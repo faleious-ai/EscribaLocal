@@ -88,8 +88,81 @@ def generate_voice_1_5b(
         except Exception as e:
             logger.error(f"Erro na inferência real do VibeVoice-TTS-1.5B: {e}")
             
-    # Fallback: Gera um sinal de áudio simulado de alta fidelidade
-    logger.info("Executando fallback para simulação de síntese de voz (TTS-1.5B)...")
+    # Fallback: Gera voz de verdade em português/inglês utilizando o SAPI5 nativo do Windows
+    logger.info("Executando fallback SAPI5 do Windows para síntese de voz (TTS-1.5B)...")
+    try:
+        import win32com.client
+        import tempfile
+        
+        sapi_voice = win32com.client.Dispatch("SAPI.SpVoice")
+        
+        # Filtra a voz com base na seleção
+        selected_voice = None
+        voices = sapi_voice.GetVoices()
+        
+        # Vamos mapear speaker_2 e speaker_4 como vozes femininas (Maria ou Zira se disponível)
+        is_female = speaker_id in ["speaker_2", "speaker_4"]
+        
+        for voice in voices:
+            desc = voice.GetDescription()
+            # Prefere Português se possível
+            if "Portuguese" in desc or "Maria" in desc:
+                if not is_female and "Maria" in desc:
+                    # Se for Maria, é feminina. Mas se temos poucas vozes no Windows, usamos a que tivermos.
+                    selected_voice = voice
+                else:
+                    selected_voice = voice
+            elif not selected_voice:
+                selected_voice = voice
+                
+        # Se for speaker_2 ou speaker_4 e acharmos Maria ou Zira, prioriza
+        if is_female:
+            for voice in voices:
+                desc = voice.GetDescription()
+                if "Maria" in desc or "Zira" in desc:
+                    selected_voice = voice
+                    break
+        else:
+            for voice in voices:
+                desc = voice.GetDescription()
+                if "Maria" not in desc and "Zira" not in desc:
+                    selected_voice = voice
+                    break
+                    
+        if selected_voice:
+            sapi_voice.Voice = selected_voice
+            
+        # Define a velocidade de fala (-10 a 10) baseada no multiplicador speed (0.5 a 2.0)
+        # SAPI5 speed default is 0. 1.0x -> 0. 1.5x -> 4. 2.0x -> 8. 0.5x -> -4.
+        sapi_rate = int((speed - 1.0) * 8.0)
+        sapi_voice.Rate = max(-10, min(10, sapi_rate))
+        
+        # Cria arquivo temporário WAV usando SAPI5
+        fd, temp_wav_path = tempfile.mkstemp(suffix=".wav")
+        os.close(fd)
+        
+        fs = win32com.client.Dispatch("SAPI.SpFileStream")
+        # 3 = SSFMCreateForWrite
+        fs.Open(temp_wav_path, 3, False)
+        sapi_voice.AudioOutputStream = fs
+        sapi_voice.Speak(text)
+        fs.Close()
+        
+        # Lê o conteúdo do arquivo gerado
+        with open(temp_wav_path, "rb") as f:
+            wav_bytes = f.read()
+            
+        # Deleta arquivo temporário
+        try:
+            os.remove(temp_wav_path)
+        except Exception:
+            pass
+            
+        return wav_bytes
+        
+    except Exception as e:
+        logger.error(f"Erro ao usar SAPI5: {e}. Usando fallback secundário senoidal...")
+        
     sample_rate = 24000
     duration = max(2.0, min(15.0, len(text) * 0.08)) # duraçao proporcional ao tamanho do texto
     t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)

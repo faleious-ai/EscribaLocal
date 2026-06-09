@@ -88,9 +88,70 @@ def generate_voice_stream_0_5b(
         except Exception as e:
             logger.error(f"Erro na inferência em tempo real do VibeVoice-Realtime-0.5B: {e}")
             
-    # Fallback: Dividimos o texto por palavras e simulamos o streaming
-    # entregando blocos de áudio de 0.2 segundos com baixíssima latência (300ms)
-    logger.info("Executando fallback para simulação de streaming de voz (Realtime-0.5B)...")
+    # Fallback: Voz real e fluída utilizando o SAPI5 nativo do Windows em tempo real
+    logger.info("Executando fallback SAPI5 do Windows para streaming de voz (Realtime-0.5B)...")
+    try:
+        import win32com.client
+        
+        sapi_voice = win32com.client.Dispatch("SAPI.SpVoice")
+        
+        # Filtra a voz com base na seleção
+        selected_voice = None
+        voices = sapi_voice.GetVoices()
+        is_female = speaker_id in ["speaker_2", "speaker_4"]
+        
+        for voice in voices:
+            desc = voice.GetDescription()
+            if "Portuguese" in desc or "Maria" in desc:
+                selected_voice = voice
+            elif not selected_voice:
+                selected_voice = voice
+                
+        if is_female:
+            for voice in voices:
+                desc = voice.GetDescription()
+                if "Maria" in desc or "Zira" in desc:
+                    selected_voice = voice
+                    break
+        else:
+            for voice in voices:
+                desc = voice.GetDescription()
+                if "Maria" not in desc and "Zira" not in desc:
+                    selected_voice = voice
+                    break
+                    
+        if selected_voice:
+            sapi_voice.Voice = selected_voice
+            
+        sapi_rate = int((speed - 1.0) * 8.0)
+        sapi_voice.Rate = max(-10, min(10, sapi_rate))
+        
+        # Gera o áudio por frases ou parágrafos para simular streaming/baixa latência de retorno
+        import re
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        
+        for sentence in sentences:
+            if not sentence.strip():
+                continue
+                
+            mem_stream = win32com.client.Dispatch("SAPI.SpMemoryStream")
+            # 30 = SPSF_24kHz16BitMono
+            mem_stream.Format.Type = 30
+            sapi_voice.AudioOutputStream = mem_stream
+            sapi_voice.Speak(sentence)
+            
+            # Obtém os bytes PCM do stream de memória
+            pcm_data = bytes(mem_stream.GetData())
+            
+            # Envia em chunks menores de 8KB (para simular streaming de tempo real com baixa latência)
+            chunk_size = 8192
+            for i in range(0, len(pcm_data), chunk_size):
+                yield pcm_data[i:i+chunk_size]
+        return
+        
+    except Exception as e:
+        logger.error(f"Erro ao usar streaming SAPI5: {e}. Usando fallback senoidal...")
+        
     sample_rate = 24000
     
     # Geramos blocos curtos simulando cada palavra falada
