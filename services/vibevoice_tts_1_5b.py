@@ -12,7 +12,7 @@ logger = logging.getLogger("EscribaLocal.VibeVoiceTTS15B")
 # Cache global do modelo
 _tts_model = None
 _tts_processor = None
-_model_id = "microsoft/VibeVoice-TTS-1.5B"
+_model_id = "microsoft/VibeVoice-1.5B"
 
 def get_tts_model_and_processor():
     """
