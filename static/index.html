@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EscribaLocal - Transcrição de Alta Performance</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css?v=3">
+</head>
+<body>
+    <div class="app-container">
+        <!-- HEADER -->
+        <header class="app-header">
+            <div class="logo-area">
+                <div class="logo-icon">✍️</div>
+                <div>
+                    <h1>EscribaLocal</h1>
+                    <p class="subtitle">Transcrição de Alta Performance & Resumos de Áudio</p>
+                </div>
+            </div>
+            <!-- HARDWARE WIDGETS -->
+            <div class="hardware-monitor">
+                <div class="hw-item" id="cpu-stat">
+                    <span class="hw-label">CPU</span>
+                    <span class="hw-value">--%</span>
+                    <div class="hw-bar"><div class="hw-bar-inner" style="width: 0%"></div></div>
+                </div>
+                <div class="hw-item" id="ram-stat">
+                    <span class="hw-label">RAM</span>
+                    <span class="hw-value">-- / -- GB</span>
+                    <div class="hw-bar"><div class="hw-bar-inner" style="width: 0%"></div></div>
+                </div>
+                <div class="hw-item" id="gpu-stat">
+                    <span class="hw-label">GPU (CUDA)</span>
+                    <span class="hw-value">Carregando...</span>
+                    <div class="hw-bar"><div class="hw-bar-inner" style="width: 0%"></div></div>
+                </div>
+            </div>
+        </header>
+
+        <!-- MAIN TABS: ASR VS TTS -->
+        <div class="main-mode-nav">
+            <button class="mode-tab-btn active" id="mode-tab-asr" data-mode="asr">📝 Transcrever Áudio (ASR)</button>
+            <button class="mode-tab-btn" id="mode-tab-tts" data-mode="tts">🔊 Geração de Voz (TTS)</button>
+        </div>
+
+        <!-- MAIN LAYOUT -->
+        <main class="app-main">
+            <!-- SIDEBAR: CONFIGURAÇÕES -->
+            <section class="sidebar-panel">
+                <div class="panel-header">
+                    <h2>⚙️ Ajustes de IA</h2>
+                    <span class="badge badge-hardware" id="recommendation-badge">RTX 3050 Ativa</span>
+                </div>
+                <div class="panel-body">
+                    <!-- ASR CONFIGS CONTAINER -->
+                    <div id="asr-configs-sidebar">
+                        </div>
+                    </div>
+
+                    <!-- WHISPER OPTIONS CONTAINER -->
+                    <div id="whisper-options-container">
+                        <!-- MODEL -->
+                        <div class="config-group">
+                            <div class="config-title">
+                                <label for="input-model">Modelo do Whisper</label>
+                                <button type="button" class="info-btn" data-info="whisper_model">i</button>
+                            </div>
+                            <select id="input-model" class="form-select">
+                                <option value="tiny">Tiny (Rápido, menor precisão)</option>
+                                <option value="base">Base (Boa velocidade)</option>
+                                <option value="small">Small (Equilibrado)</option>
+                                <option value="medium">Medium (Excelente para PT-BR)</option>
+                                <option value="large-v3-turbo" selected>Large V3 Turbo (Recomendado - Ultra Rápido & Preciso)</option>
+                                <option value="large-v3">Large V3 (Máxima Precisão, mais lento)</option>
+                            </select>
+                            <div class="recommendation-box">
+                                <strong>Recomendado:</strong> <code>Large V3 Turbo</code>. Une a precisão de um modelo gigante com velocidade otimizada usando a aceleração da sua GPU RTX 3050 (6GB).
+                            </div>
+                        </div>
+
+                        <!-- DEVICE -->
+                        <div class="config-group" style="margin-top: 15px;">
+                            <div class="config-title">
+                                <label for="input-device">Dispositivo (Hardware)</label>
+                                <button type="button" class="info-btn" data-info="device">i</button>
+                            </div>
+                            <select id="input-device" class="form-select">
+                                <option value="cuda" selected>CUDA (GPU dedicada RTX 3050) [10x - 20x mais rápido]</option>
+                                <option value="cpu">CPU (Processador Intel i7-13650HX)</option>
+                            </select>
+                            <div class="recommendation-box">
+                                <strong>Recomendado:</strong> <code>CUDA</code>. O processamento por placa de vídeo dedicada é ideal para áudios de 1h+, reduzindo o tempo de horas para minutos.
+                            </div>
+                        </div>
+
+                        <!-- COMPUTE TYPE -->
+                        <div class="config-group" style="margin-top: 15px;">
+                            <div class="config-title">
+                                <label for="input-compute">Tipo de Precisão</label>
+                                <button type="button" class="info-btn" data-info="compute_type">i</button>
+                            </div>
+                            <select id="input-compute" class="form-select">
+                                <option value="float16" selected>Float16 (Padrão para GPUs RTX)</option>
+                                <option value="int8_float16">Int8 Float16 (Menor uso de VRAM na GPU)</option>
+                                <option value="int8">Int8 (Recomendado para CPU)</option>
+                                <option value="float32">Float32 (Precisão total, muito lento)</option>
+                            </select>
+                            <div class="recommendation-box">
+                                <strong>Recomendado:</strong> <code>Float16</code> para GPU. Oferece o processamento mais veloz nas placas GeForce. Se receber erro de falta de memória (VRAM), mude para <code>Int8 Float16</code>.
+                            </div>
+                        </div>
+
+                        <!-- BEAM SIZE -->
+                        <div class="config-group" style="margin-top: 15px;">
+                            <div class="config-title">
+                                <label for="input-beam">Tamanho de Busca (Beam Size): <span id="beam-value">5</span></label>
+                                <button type="button" class="info-btn" data-info="beam_size">i</button>
+                            </div>
+                            <input type="range" id="input-beam" min="1" max="10" value="5" class="form-range">
+                            <div class="recommendation-box">
+                                <strong>Recomendado:</strong> <code>5</code>. É o equilíbrio perfeito de precisão para áudios clínicos. Diminua para <code>3</code> caso queira ganho extra de velocidade.
+                            </div>
+                        </div>
+
+                        <!-- VAD FILTER -->
+                        <div class="config-group" style="margin-top: 15px;">
+                            <div class="config-title">
+                                <label class="toggle-container">
+                                    <input type="checkbox" id="input-vad" checked>
+                                    <span class="toggle-slider"></span>
+                                    Filtro de Silêncio (VAD)
+                                </label>
+                                <button type="button" class="info-btn" data-info="vad_filter">i</button>
+                            </div>
+                            <div class="recommendation-box">
+                                <strong>Recomendado:</strong> <code>Ativado</code>. Essencial para terapia, pois silêncios prolongados e respirações fortes costumam causar alucinações de repetição de texto.
+                            </div>
+                        </div>
+
+                        <!-- CPU THREADS -->
+                        <div class="config-group" style="margin-top: 15px;">
+                            <div class="config-title">
+                                <label for="input-threads">Threads de CPU: <span id="threads-value">8</span></label>
+                                <button type="button" class="info-btn" data-info="cpu_threads">i</button>
+                            </div>
+                            <input type="range" id="input-threads" min="1" max="16" value="8" class="form-range">
+                            <div class="recommendation-box">
+                                <strong>Recomendado:</strong> <code>8</code> a <code>12</code>. O seu i7 possui 14 núcleos físicos (20 lógicos). Manter em 8 garante alto rendimento sem travar o seu Windows.
+                            </div>
+                        </div>
+
+                        <!-- WHISPER LANGUAGE -->
+                        <div class="config-group" style="margin-top: 15px;">
+                            <div class="config-title">
+                                <label for="whisper-language">Idioma do Whisper (Padrão: Auto)</label>
+                                <button type="button" class="info-btn" data-info="whisper_language">i</button>
+                            </div>
+                            <select id="whisper-language" class="form-select">
+                                <option value="auto" selected>Detectar Automaticamente (Padrão)</option>
+                                <option value="pt">Português (Brasil)</option>
+                                <option value="en">Inglês (English)</option>
+                                <option value="es">Espanhol (Español)</option>
+                            </select>
+                        </div>
+
+                        <!-- WHISPER TEMPERATURE -->
+                        <div class="config-group" style="margin-top: 15px;">
+                            <div class="config-title">
+                                <label for="whisper-temperature">Temperatura (Whisper): <span id="whisper-temp-value">0.0</span></label>
+                                <button type="button" class="info-btn" data-info="whisper_temperature">i</button>
+                            </div>
+                            <input type="range" id="whisper-temperature" min="0.0" max="1.0" step="0.1" value="0.0" class="form-range">
+                        </div>
+
+                        <!-- WHISPER PROMPT (HOTWORDS) -->
+                        <div class="config-group" style="margin-top: 15px;">
+                            <div class="config-title">
+                                <label for="whisper-prompt">Termos Customizados (Whisper) (Padrão: Vazio)</label>
+                                <button type="button" class="info-btn" data-info="whisper_prompt">i</button>
+                            </div>
+                            <textarea id="whisper-prompt" class="form-select" style="height: 60px; resize: vertical; font-family: inherit; font-size: 13px;" placeholder="Ex: Ritalina, Venvanse, anamnese, CID-10..."></textarea>
+                        </div>
+                    </div>
+
+                    <!-- VIBEVOICE OPTIONS CONTAINER -->
+                    <div id="vibevoice-options-container" style="display: none;">
+                        <!-- VIBEVOICE PROMPT (HOTWORDS) -->
+                        <div class="config-group">
+                            <div class="config-title">
+                                <label for="vibevoice-prompt">Termos Customizados (Hotwords) (Padrão: Vazio)</label>
+                                <button type="button" class="info-btn" data-info="vibevoice_prompt">i</button>
+                            </div>
+                            <textarea id="vibevoice-prompt" class="form-select" style="height: 100px; resize: vertical; font-family: inherit; font-size: 13px;" placeholder="Ex: Fluoxetina, Sertralina, Terapia Cognitivo-Comportamental, fobia social..."></textarea>
+                            <div class="recommendation-box">
+                                Força o VibeVoice a reconhecer termos específicos importantes no áudio.
+                            </div>
+                        </div>
+
+                        <!-- VIBEVOICE DIARIZATION -->
+                        <div class="config-group" style="margin-top: 15px;">
+                            <div class="config-title">
+                                <label class="toggle-container">
+                                    <input type="checkbox" id="vibevoice-diarization" checked>
+                                    <span class="toggle-slider"></span>
+                                    Diarização (Separar Vozes) (Padrão: Ativo)
+                                </label>
+                                <button type="button" class="info-btn" data-info="vibevoice_diarization">i</button>
+                            </div>
+                            <div class="recommendation-box">
+                                <strong>Recomendado:</strong> <code>Ativado</code>. Essencial para identificar e separar os falantes no diálogo.
+                            </div>
+                        </div>
+
+                        <!-- VIBEVOICE CHUNK SIZE -->
+                        <div class="config-group" style="margin-top: 15px;">
+                            <div class="config-title">
+                                <label for="vibevoice-chunk-size">Tamanho da Fatia (Segundos): <span id="vibevoice-chunk-value">45</span>s</label>
+                                <button type="button" class="info-btn" data-info="vibevoice_chunk_size">i</button>
+                            </div>
+                            <input type="range" id="vibevoice-chunk-size" min="15" max="90" value="45" step="5" class="form-range">
+                        </div>
+
+                        <!-- VIBEVOICE TEMPERATURE -->
+                        <div class="config-group" style="margin-top: 15px;">
+                            <div class="config-title">
+                                <label for="vibevoice-temperature">Temperatura (VibeVoice): <span id="vibevoice-temp-value">0.0</span></label>
+                                <button type="button" class="info-btn" data-info="vibevoice_temperature">i</button>
+                            </div>
+                            <input type="range" id="vibevoice-temperature" min="0.0" max="1.0" step="0.1" value="0.0" class="form-range">
+                        </div>
+
+                        <!-- VIBEVOICE REPETITION PENALTY -->
+                        <div class="config-group" style="margin-top: 15px;">
+                            <div class="config-title">
+                                <label for="vibevoice-repetition-penalty">Penalidade de Repetição: <span id="vibevoice-rep-value">1.1</span></label>
+                                <button type="button" class="info-btn" data-info="vibevoice_repetition_penalty">i</button>
+                            </div>
+                            <input type="range" id="vibevoice-repetition-penalty" min="1.0" max="1.5" step="0.05" value="1.1" class="form-range">
+                        </div>
+
+                        <!-- VIBEVOICE TOP-P -->
+                        <div class="config-group" style="margin-top: 15px;">
+                            <div class="config-title">
+                                <label for="vibevoice-top-p">Top-P (Nucleus Sampling): <span id="vibevoice-topp-value">1.0</span></label>
+                                <button type="button" class="info-btn" data-info="vibevoice_top_p">i</button>
+                            </div>
+                            <input type="range" id="vibevoice-top-p" min="0.0" max="1.0" step="0.05" value="1.0" class="form-range">
+                        </div>
+
+                        <!-- VIBEVOICE TOP-K -->
+                        <div class="config-group" style="margin-top: 15px;">
+                            <div class="config-title">
+                                <label for="vibevoice-top-k">Top-K: <span id="vibevoice-topk-value">50</span></label>
+                                <button type="button" class="info-btn" data-info="vibevoice_top_k">i</button>
+                            </div>
+                            <input type="range" id="vibevoice-top-k" min="1" max="100" step="1" value="50" class="form-range">
+                        </div>
+
+                        <!-- VIBEVOICE NUM BEAMS -->
+                        <div class="config-group" style="margin-top: 15px;">
+                            <div class="config-title">
+                                <label for="vibevoice-num-beams">Busca por Feixe (Num Beams): <span id="vibevoice-beams-value">1</span></label>
+                                <button type="button" class="info-btn" data-info="vibevoice_num_beams">i</button>
+                            </div>
+                            <input type="range" id="vibevoice-num-beams" min="1" max="5" step="1" value="1" class="form-range">
+                        </div>
+
+                        <!-- VIBEVOICE MAX NEW TOKENS -->
+                        <div class="config-group" style="margin-top: 15px;">
+                            <div class="config-title">
+                                <label for="vibevoice-max-new-tokens">Limite de Tokens: <span id="vibevoice-tokens-value">2048</span></label>
+                                <button type="button" class="info-btn" data-info="vibevoice_max_new_tokens">i</button>
+                            </div>
+                            <input type="range" id="vibevoice-max-new-tokens" min="512" max="4096" step="128" value="2048" class="form-range">
+                        </div>
+                        
+                        <div class="recommendation-box" style="margin-top: 15px; border-left-color: var(--accent-purple);">
+                            <strong>Otimização de Hardware:</strong> O VibeVoice será carregado usando quantização seletiva NF4 4-bit, utilizando cerca de 5.5GB da RTX 3050 e da memória do sistema, com execução estável no seu Windows.
+                        </div>
+                    </div>
+
+                    <!-- STREAMING CHUNK SIZE -->
+                    <div class="config-group" id="config-chunk-size" style="display: none; margin-top: 15px;">
+                        <div class="config-title">
+                            <label for="input-chunk-size">Tamanho do Trecho (Tempo Real): <span id="chunk-value">5</span>s</label>
+                            <button type="button" class="info-btn" data-info="live_chunk_size">i</button>
+                        </div>
+                        <input type="range" id="input-chunk-size" min="2" max="20" value="5" class="form-range">
+                        <div class="recommendation-box">
+                            <strong>Recomendado:</strong> <code>4</code> a <code>8</code> segundos. Valores menores dão respostas mais rápidas, enquanto valores maiores dão maior concordância às frases.
+                        </div>
+                    </div> <!-- Fim de #asr-configs-sidebar -->
+
+                    <!-- TTS CONFIGS CONTAINER -->
+                    <div id="tts-configs-sidebar" style="display: none;">
+                        <!-- TTS MODEL SELECT -->
+                        <div class="config-group">
+                            <div class="config-title">
+                                <label for="input-tts-model">Modelo de Síntese</label>
+                                <button type="button" class="info-btn" data-info="tts_model">i</button>
+                            </div>
+                            <select id="input-tts-model" class="form-select">
+                                <option value="tts_1_5b" selected>VibeVoice-TTS-1.5B (Longa Duração & Multi-Falante)</option>
+                                <option value="realtime_0_5b">VibeVoice-Realtime-0.5B (Tempo Real / Baixa Latência)</option>
+                            </select>
+                            <div class="recommendation-box">
+                                <strong>VibeVoice-TTS-1.5B:</strong> Ideal para converter textos longos ou diálogos.
+                                <br><strong>Realtime-0.5B:</strong> Ideal para uso como assistente de voz e feedback imediato.
+                            </div>
+                        </div>
+
+                        <!-- SPEAKER SELECT -->
+                        <div class="config-group" style="margin-top: 15px;">
+                            <div class="config-title">
+                                <label for="input-tts-speaker">Voz / Locutor Padrão</label>
+                                <button type="button" class="info-btn" data-info="tts_speaker">i</button>
+                            </div>
+                            <select id="input-tts-speaker" class="form-select">
+                                <option value="speaker_1" selected>Voz 1 (Masculina - Firme & Comercial)</option>
+                                <option value="speaker_2">Voz 2 (Feminina - Suave & Explicativa)</option>
+                                <option value="speaker_3">Voz 3 (Masculina - Narrador de História)</option>
+                                <option value="speaker_4">Voz 4 (Feminina - Dinâmica & Conversacional)</option>
+                            </select>
+                        </div>
+
+                        <!-- TEMPERATURE (TTS) -->
+                        <div class="config-group" style="margin-top: 15px;">
+                            <div class="config-title">
+                                <label for="input-tts-temp">Temperatura: <span id="tts-temp-value">0.7</span></label>
+                                <button type="button" class="info-btn" data-info="tts_temperature">i</button>
+                            </div>
+                            <input type="range" id="input-tts-temp" min="0.1" max="1.2" step="0.05" value="0.7" class="form-range">
+                        </div>
+
+                        <!-- SPEED (TTS) -->
+                        <div class="config-group" style="margin-top: 15px;">
+                            <div class="config-title">
+                                <label for="input-tts-speed">Velocidade: <span id="tts-speed-value">1.0</span>x</label>
+                                <button type="button" class="info-btn" data-info="tts_speed">i</button>
+                            </div>
+                            <input type="range" id="input-tts-speed" min="0.5" max="2.0" step="0.1" value="1.0" class="form-range">
+                        </div>
+
+                        <!-- REPETITION PENALTY (TTS) -->
+                        <div class="config-group" style="margin-top: 15px;">
+                            <div class="config-title">
+                                <label for="input-tts-rep-penalty">Penalidade de Repetição: <span id="tts-rep-value">1.1</span></label>
+                                <button type="button" class="info-btn" data-info="tts_repetition_penalty">i</button>
+                            </div>
+                            <input type="range" id="input-tts-rep-penalty" min="1.0" max="1.5" step="0.05" value="1.1" class="form-range">
+                        </div>
+                        
+                        <div class="recommendation-box" style="margin-top: 15px; border-left-color: var(--accent-cyan);">
+                            <strong>Hardware RTX 3050:</strong> Os pesos serão carregados via GPU com quantização NF4 4-bit para evitar estourar a memória de 6GB de vídeo e garantir síntese fluida no Windows.
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- WORKSPACE PANEL -->
+            <section class="workspace-panel">
+                <!-- ASR WORKSPACE -->
+                <div id="asr-workspace-container">
+                    <!-- MODO DE ENTRADA TABS -->
+                    <div class="input-modes-tabs">
+                        <button class="tab-btn active" data-mode="file">📁 Arquivo de Áudio</button>
+                        <button class="tab-btn" data-mode="record">🎙️ Gravador de Áudio</button>
+                        <button class="tab-btn" data-mode="live">⚡ Transcrição Ao Vivo</button>
+                    </div>
+
+                    <!-- DROP ZONE & FILE SELECTION (MODO ARQUIVO) -->
+                    <div class="drop-zone" id="audio-drop-zone">
+                        <div class="drop-zone-icon">📥</div>
+                        <h3>Arraste o seu áudio aqui</h3>
+                        <p>ou clique para explorar arquivos do computador</p>
+                        <span class="file-limits">Suporta MP3, WAV, M4A, AAC, FLAC e outros formatos de áudio.</span>
+                        <input type="file" id="file-input" accept="audio/*" style="display: none;">
+                    </div>
+
+                    <!-- MIC RECORD PANEL (MODO GRAVADOR) -->
+                    <div class="mic-panel" id="mic-record-panel" style="display: none;">
+                        <div class="mic-panel-icon">🎙️</div>
+                        <h3>Gravador de Áudio Interno</h3>
+                        <p id="mic-record-status">Pronto para gravar áudio localmente</p>
+                        <div class="recording-timer" id="recording-timer">00:00</div>
+                        <div class="mic-actions">
+                            <button class="btn btn-primary" id="btn-start-mic-record">🔴 Iniciar Gravação</button>
+                            <button class="btn btn-secondary" id="btn-pause-mic-record" style="display: none;">⏸️ Pausar</button>
+                            <button class="btn btn-danger" id="btn-stop-mic-record" style="display: none;">⏹️ Parar e Transcrever</button>
+                        </div>
+                    </div>
+
+                    <!-- LIVE MIC PANEL (MODO AO VIVO) -->
+                    <div class="mic-panel" id="mic-live-panel" style="display: none;">
+                        <div class="mic-panel-icon-live">⚡</div>
+                        <h3>Transcrição em Tempo Real</h3>
+                        <p id="mic-live-status">Fale ao microfone após iniciar a transmissão</p>
+                        <div class="mic-actions">
+                            <button class="btn btn-primary btn-large" id="btn-start-mic-live" style="width: auto;">🎙️ Iniciar Transmissão Ao Vivo</button>
+                            <button class="btn btn-danger btn-large" id="btn-stop-mic-live" style="display: none; width: auto;">⏹️ Encerrar Transmissão</button>
+                        </div>
+                    </div>
+
+                    <!-- ACTIVE FILE BANNER -->
+                    <div class="active-file-banner" id="active-file-banner" style="display: none;">
+                        <div class="file-details">
+                            <span class="file-icon">🎵</span>
+                            <div class="file-meta">
+                                <span class="file-name" id="selected-file-name">NomeDoAudio.mp3</span>
+                                <span class="file-size" id="selected-file-size">0.0 MB</span>
+                            </div>
+                        </div>
+                        <button class="btn btn-danger" id="btn-cancel-file">Remover</button>
+                    </div>
+
+                    <!-- TRANSCRIPTION CONTROL & PROGRESS -->
+                    <div class="transcribe-action-area" id="transcribe-action-area" style="display: none;">
+                        <button class="btn btn-primary btn-large" id="btn-start-transcription">
+                            🚀 Iniciar Transcrição de Alta Performance
+                        </button>
+                        
+                        <div class="progress-container" id="transcription-progress-container" style="display: none;">
+                            <div class="progress-header">
+                                <span id="progress-status">Preparando transcrição...</span>
+                                <span id="progress-percentage">0%</span>
+                            </div>
+                            <div class="progress-bar-bg">
+                                <div class="progress-bar-fill" id="progress-bar-fill" style="width: 0%"></div>
+                            </div>
+                            <div class="progress-footer">
+                                <span id="time-elapsed">Decorrido: 00:00</span>
+                                <span id="time-eta">Previsão (ETA): Calculando...</span>
+                            </div>
+                            <div class="progress-actions" style="margin-top: 10px; display: flex; justify-content: flex-end;">
+                                <button class="btn btn-danger btn-small" id="btn-stop-transcription">🛑 Parar Transcrição</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TRANSCRIPTION WORKSPACE AREA -->
+                    <div class="dual-workspace" id="dual-workspace" style="display: none;">
+                        <!-- TRANSCRIPT EDITOR -->
+                        <div class="workspace-column left-column" style="width: 100%;">
+                            <div class="column-header">
+                                <h3>📝 Texto Transcrito</h3>
+                                <div class="header-actions">
+                                    <input type="text" id="search-transcript" placeholder="Buscar no texto..." class="search-input">
+                                    <button class="btn btn-toggle active" id="btn-toggle-timestamps" title="Exibir/Ocultar Marcadores de Tempo">⏱️ Tempo</button>
+                                    <button class="btn btn-toggle active" id="btn-toggle-speakers" title="Exibir/Ocultar Falantes">👤 Falantes</button>
+                                    <button class="btn btn-secondary btn-small" id="btn-copy-transcript">Copiar Tudo</button>
+                                    <button class="btn btn-secondary btn-small" id="btn-download-txt">Baixar TXT</button>
+                                </div>
+                            </div>
+                            <div class="transcript-editor-container">
+                                <!-- AUDIO PLAYER SYNC -->
+                                <div class="player-wrapper">
+                                    <audio id="workspace-audio-player" controls></audio>
+                                </div>
+                                <!-- SEGMENTS VIEW -->
+                                <div class="transcript-segments-list" id="transcript-segments-list">
+                                    <!-- Preenchido dinamicamente via JS -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TTS WORKSPACE -->
+                <div id="tts-workspace-container" style="display: none;">
+                    <!-- MODO TTS TABS -->
+                    <div class="input-modes-tabs">
+                        <button class="tab-btn tts-tab-btn active" data-tts-mode="single">🔊 Geração de Voz (Long-form)</button>
+                        <button class="tab-btn tts-tab-btn" data-tts-mode="dialog">👥 Diálogo Multi-Falante</button>
+                        <button class="tab-btn tts-tab-btn" data-tts-mode="chat">💬 Assistente Chat (Realtime)</button>
+                    </div>
+
+                    <!-- TTS SINGLE SPEAKER WORKSPACE -->
+                    <div class="tts-mode-panel" id="tts-panel-single">
+                        <div class="tts-input-container" style="margin-top: 20px;">
+                            <textarea id="tts-input-text" placeholder="Digite o texto que você deseja transformar em voz com o VibeVoice-TTS-1.5B..." style="width: 100%; height: 120px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); padding: 12px; font-family: inherit; resize: none; outline: none;"></textarea>
+                            <div style="margin-top: 15px; display: flex; justify-content: flex-end;">
+                                <button class="btn btn-primary" id="btn-generate-tts">🔊 Sintetizar Voz</button>
+                            </div>
+                        </div>
+                        
+                        <div class="tts-result-area" id="tts-result-single" style="display: none; margin-top: 25px; background: rgba(255,255,255,0.02); padding: 20px; border-radius: 12px; border: 1px solid var(--border-color);">
+                            <h4>🎙️ Áudio Sintetizado</h4>
+                            <div style="display: flex; gap: 15px; align-items: center; margin-top: 10px;">
+                                <audio id="tts-audio-player-single" controls style="flex: 1;"></audio>
+                                <a id="btn-download-tts-single" class="btn btn-secondary btn-small" download="voz_sintetizada.wav">📥 Baixar WAV</a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TTS DIALOG WORKSPACE -->
+                    <div class="tts-mode-panel" id="tts-panel-dialog" style="display: none;">
+                        <div class="tts-input-container" style="margin-top: 20px;">
+                            <p class="file-limits" style="margin-bottom: 8px;">Escreva o diálogo abaixo separando as falas por linhas e identificando as vozes (ex: <i>Voz 1: texto</i>, <i>Voz 2: texto</i>):</p>
+                            <textarea id="tts-input-dialog" style="width: 100%; height: 150px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); padding: 12px; font-family: inherit; resize: none; outline: none;">Voz 1: Olá! Como está o desempenho dos modelos hoje?
+Voz 2: Está incrível! A RTX 3050 está gerando o áudio com baixíssima latência.
+Voz 1: Excelente. E os novos módulos separados de síntese de voz estão operando?
+Voz 2: Sim, os dois modelos VibeVoice de TTS e Realtime estão prontos.</textarea>
+                            <div style="margin-top: 15px; display: flex; justify-content: flex-end;">
+                                <button class="btn btn-primary" id="btn-generate-dialog">👥 Gerar Conversa Completa</button>
+                            </div>
+                        </div>
+                        
+                        <div class="tts-result-area" id="tts-result-dialog" style="display: none; margin-top: 25px; background: rgba(255,255,255,0.02); padding: 20px; border-radius: 12px; border: 1px solid var(--border-color);">
+                            <h4>🎙️ Diálogo Gerado</h4>
+                            <div style="display: flex; gap: 15px; align-items: center; margin-top: 10px;">
+                                <audio id="tts-audio-player-dialog" controls style="flex: 1;"></audio>
+                                <a id="btn-download-tts-dialog" class="btn btn-secondary btn-small" download="dialogo_sintetizado.wav">📥 Baixar WAV</a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TTS CHAT / ASSISTENTE WORKSPACE -->
+                    <div class="tts-mode-panel" id="tts-panel-chat" style="display: none;">
+                        <div class="chat-container" style="margin-top: 20px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; height: 350px; display: flex; flex-direction: column; overflow: hidden;">
+                            <div class="chat-messages" id="tts-chat-messages" style="flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;">
+                                <div class="chat-bubble assistant" style="background: rgba(0,242,254,0.08); padding: 10px 15px; border-radius: 12px 12px 12px 2px; align-self: flex-start; max-width: 80%; border: 1px solid rgba(0,242,254,0.15); font-size: 13px;">
+                                    Olá! Eu sou o assistente de voz em tempo real alimentado pelo VibeVoice-Realtime-0.5B. Digite uma mensagem abaixo e eu responderei falando imediatamente!
+                                </div>
+                            </div>
+                            <div class="chat-input-row" style="display: flex; padding: 12px; border-top: 1px solid var(--border-color); background: rgba(0,0,0,0.2); gap: 10px; align-items: center;">
+                                <input type="text" id="tts-chat-input" placeholder="Digite uma frase para o assistente falar..." style="flex: 1; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-primary); padding: 8px 12px; border-radius: 6px; outline: none; font-size: 13px;">
+                                <button class="btn btn-primary btn-small" id="btn-send-tts-chat" style="padding: 8px 16px;">Enviar ⚡</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- MODAL DE EXPLICAÇÃO DETALHADA -->
+    <div id="info-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">Explicação do Parâmetro</h3>
+                <button type="button" id="modal-close-btn" class="modal-close-btn">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-body-content">
+                <!-- Conteúdo dinâmico -->
+            </div>
+        </div>
+    </div>
+
+    <!-- NOTIFICAÇÃO FLUTUANTE -->
+    <div class="toast" id="toast-notification">Mensagem de aviso aqui</div>
+
+    <script src="/static/app.js?v=3"></script>
+</body>
+</html>
