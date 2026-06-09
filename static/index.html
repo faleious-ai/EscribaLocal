@@ -57,8 +57,17 @@
                 <div class="panel-body">
                     <!-- ASR CONFIGS CONTAINER -->
                     <div id="asr-configs-sidebar">
+                        <!-- ENGINE SELECT -->
+                        <div class="config-group">
+                            <div class="config-title">
+                                <label for="input-engine">Motor de IA (Engine)</label>
+                                <button type="button" class="info-btn" data-info="engine">i</button>
+                            </div>
+                            <select id="input-engine" class="form-select">
+                                <option value="whisper" selected>Whisper (Mais Rápido / Padrão)</option>
+                                <option value="vibevoice">VibeVoice ASR (Diarização de Falantes)</option>
+                            </select>
                         </div>
-                    </div>
 
                     <!-- WHISPER OPTIONS CONTAINER -->
                     <div id="whisper-options-container">
@@ -281,17 +290,6 @@
                             <strong>Otimização de Hardware:</strong> O VibeVoice será carregado usando quantização seletiva NF4 4-bit, utilizando cerca de 5.5GB da RTX 3050 e da memória do sistema, com execução estável no seu Windows.
                         </div>
                     </div>
-
-                    <!-- STREAMING CHUNK SIZE -->
-                    <div class="config-group" id="config-chunk-size" style="display: none; margin-top: 15px;">
-                        <div class="config-title">
-                            <label for="input-chunk-size">Tamanho do Trecho (Tempo Real): <span id="chunk-value">5</span>s</label>
-                            <button type="button" class="info-btn" data-info="live_chunk_size">i</button>
-                        </div>
-                        <input type="range" id="input-chunk-size" min="2" max="20" value="5" class="form-range">
-                        <div class="recommendation-box">
-                            <strong>Recomendado:</strong> <code>4</code> a <code>8</code> segundos. Valores menores dão respostas mais rápidas, enquanto valores maiores dão maior concordância às frases.
-                        </div>
                     </div> <!-- Fim de #asr-configs-sidebar -->
 
                     <!-- TTS CONFIGS CONTAINER -->
