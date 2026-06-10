@@ -69,6 +69,9 @@ def _get_transformers_pipeline(model_key: str):
 
     model_id = TTS_MODEL_IDS[model_key]
     try:
+        if torch.cuda.is_available():
+            from services.resource_arbiter import arbiter
+            arbiter.prepare_load(model_key)
         with use_custom_transformers():
             from transformers import pipeline
 
@@ -111,6 +114,9 @@ def _get_direct_vibevoice_model(model_key: str):
 
     logger.info("Carregando VibeVoice direto (%s). O modelo Large tem cerca de 18.7 GB.", model_id)
     cuda_available = torch.cuda.is_available()
+    if cuda_available:
+        from services.resource_arbiter import arbiter
+        arbiter.prepare_load(model_key)
     model_kwargs = {
         "torch_dtype": torch.bfloat16 if cuda_available else torch.float32,
     }
@@ -559,3 +565,26 @@ def unload_tts_model():
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+
+
+# Registro no árbitro de VRAM (ver services/resource_arbiter.py).
+# O unload é compartilhado: descarregar qualquer um dos dois limpa ambos os
+# caches (são o mesmo módulo e raramente coexistem em 6GB).
+from services.resource_arbiter import arbiter as _arbiter
+
+_arbiter.register_engine(
+    engine="tts_1_5b",
+    label="VibeVoice TTS 1.5B",
+    is_loaded=lambda: "tts_1_5b" in _tts_pipelines,
+    unload=unload_tts_model,
+    est_vram_mb=lambda: 5400.0,
+    current_model=lambda: TTS_MODEL_IDS["tts_1_5b"],
+)
+_arbiter.register_engine(
+    engine="tts_large",
+    label="VibeVoice TTS Large",
+    is_loaded=lambda: "tts_large" in _direct_models,
+    unload=unload_tts_model,
+    est_vram_mb=lambda: 19000.0,
+    current_model=lambda: TTS_MODEL_IDS["tts_large"],
+)

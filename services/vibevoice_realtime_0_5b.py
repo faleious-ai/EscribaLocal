@@ -45,6 +45,9 @@ def get_rt_model_and_processor():
         return _rt_pipeline
         
     try:
+        if torch.cuda.is_available():
+            from services.resource_arbiter import arbiter
+            arbiter.prepare_load("tts_realtime")
         with use_custom_transformers():
             from transformers import pipeline
             device = 0 if torch.cuda.is_available() else -1
@@ -276,3 +279,16 @@ def unload_realtime_model():
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+
+
+# Registro no árbitro de VRAM (ver services/resource_arbiter.py)
+from services.resource_arbiter import arbiter as _arbiter
+
+_arbiter.register_engine(
+    engine="tts_realtime",
+    label="VibeVoice Realtime 0.5B",
+    is_loaded=lambda: _rt_pipeline is not None,
+    unload=unload_realtime_model,
+    est_vram_mb=lambda: 1500.0,
+    current_model=lambda: _model_id,
+)

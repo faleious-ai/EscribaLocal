@@ -127,6 +127,30 @@ def get_whisper_runtime_status(
         requested_compute_type=requested_compute_type,
     )
 
+def unload_whisper_model() -> None:
+    """Descarrega o modelo Whisper ativo, liberando RAM/VRAM."""
+    global _current_model, _current_model_name, _current_device, _current_compute_type
+    if _current_model is None:
+        return
+    _current_model = None
+    _current_model_name = None
+    _current_device = None
+    _current_compute_type = None
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+def _estimate_whisper_vram_mb(model_name: str = None, compute_type: str = None) -> float:
+    from services.model_manager import get_whisper_spec
+
+    spec = get_whisper_spec(model_name or _current_model_name or "")
+    if spec is None or not spec.approx_vram_mb:
+        return 1500.0
+    estimate = spec.approx_vram_mb.get(compute_type or _current_compute_type or "")
+    return float(estimate if estimate else max(spec.approx_vram_mb.values()))
+
+
 def get_whisper_model(model_name: str, device: str, compute_type: str, cpu_threads: int = 4):
     """
     Carrega e gerencia a instância do WhisperModel utilizando cache.
@@ -145,22 +169,24 @@ def get_whisper_model(model_name: str, device: str, compute_type: str, cpu_threa
     # Libera memória se houver outro modelo carregado
     if _current_model is not None:
         logger.info("Descarregando modelo anterior para liberar memória.")
-        _current_model = None
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        unload_whisper_model()
 
     logger.info(f"Carregando WhisperModel: {model_name} no dispositivo {device} ({compute_type})")
-    
+
     # Importação tardia do faster-whisper para inicialização rápida do backend
     from faster_whisper import WhisperModel
-    
+
     # Validação do dispositivo solicitado
     if device == "cuda" and not torch.cuda.is_available():
         logger.warning("CUDA solicitado mas não disponível. Revertendo para CPU.")
         device = "cpu"
         if compute_type in ["float16", "int8_float16"]:
             compute_type = "int8"
+
+    if device == "cuda":
+        # Arbitragem de VRAM: em 6GB não cabe Whisper + VibeVoice juntos.
+        from services.resource_arbiter import arbiter
+        arbiter.prepare_load("whisper", est_vram_mb=_estimate_whisper_vram_mb(model_name, compute_type))
 
     # Inicializa o modelo
     # Para o Windows, passamos cpu_threads apropriadas
@@ -312,3 +338,16 @@ def transcribe_audio_generator(
             "type": "error",
             "message": str(e)
         }
+
+
+# Registro no árbitro de VRAM (ver services/resource_arbiter.py)
+from services.resource_arbiter import arbiter as _arbiter
+
+_arbiter.register_engine(
+    engine="whisper",
+    label="Whisper (faster-whisper)",
+    is_loaded=lambda: _current_model is not None,
+    unload=unload_whisper_model,
+    est_vram_mb=_estimate_whisper_vram_mb,
+    current_model=lambda: _current_model_name,
+)

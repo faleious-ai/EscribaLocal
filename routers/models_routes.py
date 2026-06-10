@@ -1,10 +1,11 @@
-"""Rotas do gestor de modelos: catálogo, download por job e remoção."""
+"""Rotas do gestor de modelos: catálogo, download, remoção e memória (VRAM)."""
 import asyncio
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from services import model_manager
+from services.resource_arbiter import arbiter
 
 router = APIRouter(prefix="/api", tags=["models"])
 
@@ -13,11 +14,36 @@ class DownloadRequest(BaseModel):
     model_id: str
 
 
+class UnloadRequest(BaseModel):
+    engine: str | None = None
+    all: bool = False
+
+
 @router.get("/models")
 async def list_models():
     loop = asyncio.get_running_loop()
     catalog = await loop.run_in_executor(None, model_manager.get_catalog_with_status)
     return {"models": catalog}
+
+
+@router.get("/models/loaded")
+async def loaded_models():
+    return {"engines": arbiter.status(), "policy": arbiter.policy}
+
+
+@router.post("/models/unload")
+async def unload_models(payload: UnloadRequest):
+    loop = asyncio.get_running_loop()
+    if payload.all:
+        unloaded = await loop.run_in_executor(None, arbiter.unload_all)
+        return {"unloaded": unloaded}
+    if not payload.engine:
+        raise HTTPException(status_code=400, detail="Informe 'engine' ou 'all': true.")
+    try:
+        was_loaded = await loop.run_in_executor(None, arbiter.unload_engine, payload.engine)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Engine desconhecida: {payload.engine}")
+    return {"unloaded": [payload.engine] if was_loaded else []}
 
 
 @router.post("/models/download")
