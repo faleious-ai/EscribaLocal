@@ -35,6 +35,9 @@ def get_vibevoice_model_and_processor():
 
         logger.info(f"Carregando VibeVoice-ASR-HF ({_vibevoice_model_id})...")
         cuda_available = torch.cuda.is_available()
+        if cuda_available:
+            from services.resource_arbiter import arbiter
+            arbiter.prepare_load("vibevoice_asr")
         model_dtype = torch.bfloat16 if cuda_available else torch.float32
         model_kwargs = {
             "torch_dtype": model_dtype,
@@ -126,6 +129,19 @@ def unload_vibevoice_model():
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+
+
+# Registro no árbitro de VRAM (ver services/resource_arbiter.py)
+from services.resource_arbiter import arbiter as _arbiter
+
+_arbiter.register_engine(
+    engine="vibevoice_asr",
+    label="VibeVoice ASR (diarização)",
+    is_loaded=lambda: _vibevoice_model is not None,
+    unload=unload_vibevoice_model,
+    est_vram_mb=lambda: 4500.0,  # NF4 4-bit do modelo ~7B
+    current_model=lambda: _vibevoice_model_id,
+)
 
 def transcribe_vibevoice_generator(
     file_path: str,
