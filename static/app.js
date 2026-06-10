@@ -18,7 +18,10 @@ const state = {
     isRecordingPaused: false,
     
     liveSocket: null,
-    liveMediaRecorder: null
+    liveMediaRecorder: null,
+    liveChunkTimer: null,
+    liveStopping: false,
+    lastLongformTtsModel: "tts_1_5b"
 };
 
 
@@ -41,6 +44,7 @@ const elements = {
     timeElapsed: document.getElementById("time-elapsed"),
     timeEta: document.getElementById("time-eta"),
     btnStopTranscription: document.getElementById("btn-stop-transcription"),
+    asrModelStatus: document.getElementById("asr-model-status"),
 
     
     dualWorkspace: document.getElementById("dual-workspace"),
@@ -118,16 +122,19 @@ const elements = {
     ttsResultSingle: document.getElementById("tts-result-single"),
     ttsAudioPlayerSingle: document.getElementById("tts-audio-player-single"),
     btnDownloadTtsSingle: document.getElementById("btn-download-tts-single"),
+    ttsEngineStatusSingle: document.getElementById("tts-engine-status-single"),
     
     ttsInputDialog: document.getElementById("tts-input-dialog"),
     btnGenerateDialog: document.getElementById("btn-generate-dialog"),
     ttsResultDialog: document.getElementById("tts-result-dialog"),
     ttsAudioPlayerDialog: document.getElementById("tts-audio-player-dialog"),
     btnDownloadTtsDialog: document.getElementById("btn-download-tts-dialog"),
+    ttsEngineStatusDialog: document.getElementById("tts-engine-status-dialog"),
     
     ttsChatMessages: document.getElementById("tts-chat-messages"),
     ttsChatInput: document.getElementById("tts-chat-input"),
     btnSendTtsChat: document.getElementById("btn-send-tts-chat"),
+    ttsEngineStatusChat: document.getElementById("tts-engine-status-chat"),
     
     // Painéis de Microfone
     micRecordPanel: document.getElementById("mic-record-panel"),
@@ -141,6 +148,7 @@ const elements = {
     micLiveStatus: document.getElementById("mic-live-status"),
     btnStartMicLive: document.getElementById("btn-start-mic-live"),
     btnStopMicLive: document.getElementById("btn-stop-mic-live"),
+    asrLiveModelStatus: document.getElementById("asr-live-model-status"),
     
     // Widgets de hardware
     cpuVal: document.querySelector("#cpu-stat .hw-value"),
@@ -153,6 +161,7 @@ const elements = {
 
 // --- INICIALIZAÇÃO E EVENTOS DE CONFIGURAÇÃO ---
 document.addEventListener("DOMContentLoaded", () => {
+    logClientEvent("app_loaded", { severity: "info" });
     loadSettingsFromStorage();
     setupConfigEventListeners();
     setupDragAndDrop();
@@ -177,9 +186,121 @@ function showToast(message, isError = false) {
     elements.toast.textContent = message;
     elements.toast.style.borderColor = isError ? "var(--accent-danger)" : "var(--accent-cyan)";
     elements.toast.classList.add("show");
+    if (isError) {
+        logClientEvent("toast_error", { severity: "warning", message });
+    }
     setTimeout(() => {
         elements.toast.classList.remove("show");
     }, 3000);
+}
+
+function getClientModelSnapshot() {
+    return {
+        active_mode: state.activeMode,
+        asr_engine: elements.inputEngine ? elements.inputEngine.value : null,
+        whisper_model: elements.inputModel ? elements.inputModel.value : null,
+        whisper_device: elements.inputDevice ? elements.inputDevice.value : null,
+        whisper_compute: elements.inputCompute ? elements.inputCompute.value : null,
+        tts_model: elements.inputTtsModel ? elements.inputTtsModel.value : null
+    };
+}
+
+function logClientEvent(eventType, fields = {}) {
+    const payload = {
+        event_type: eventType,
+        severity: fields.severity || "info",
+        message: fields.message || null,
+        source: fields.source || "frontend",
+        page: window.location.pathname,
+        model: getClientModelSnapshot(),
+        details: fields.details || {}
+    };
+
+    try {
+        const body = JSON.stringify(payload);
+        if (navigator.sendBeacon) {
+            const blob = new Blob([body], { type: "application/json" });
+            navigator.sendBeacon("/api/client-log", blob);
+        } else {
+            fetch("/api/client-log", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body,
+                keepalive: true
+            }).catch(() => {});
+        }
+    } catch (err) {
+        console.warn("Falha ao registrar evento local:", err);
+    }
+}
+
+window.addEventListener("error", (event) => {
+    logClientEvent("window_error", {
+        severity: "error",
+        message: event.message,
+        source: event.filename || "window",
+        details: {
+            line: event.lineno,
+            column: event.colno
+        }
+    });
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+    const reason = event.reason;
+    logClientEvent("unhandled_rejection", {
+        severity: "error",
+        message: reason && reason.message ? reason.message : String(reason),
+        source: "promise"
+    });
+});
+
+async function readErrorMessage(response, fallbackMessage) {
+    try {
+        const data = await response.json();
+        if (data && data.detail) {
+            return typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
+        }
+    } catch (err) {
+        console.warn("Não foi possível ler detalhe do erro:", err);
+    }
+    return fallbackMessage;
+}
+
+function getSelectedTtsModelLabel() {
+    if (!elements.inputTtsModel) return "Modelo selecionado";
+    const selected = elements.inputTtsModel.selectedOptions && elements.inputTtsModel.selectedOptions[0];
+    return selected ? selected.textContent.trim() : elements.inputTtsModel.value;
+}
+
+function setModelStatus(element, caption, engineLabel, fallback = false) {
+    if (!element) return;
+    const labelNode = element.querySelector("span");
+    const valueNode = element.querySelector("strong");
+    if (labelNode) labelNode.textContent = caption;
+    if (valueNode) valueNode.textContent = engineLabel || "Aguardando geração";
+    element.dataset.fallback = fallback ? "true" : "false";
+}
+
+function setTtsEngineStatus(element, caption, engineLabel, fallback = false) {
+    setModelStatus(element, caption, engineLabel, fallback);
+}
+
+function getSelectedAsrModelLabel() {
+    if (elements.inputEngine.value === "vibevoice" && state.activeMode !== "live") {
+        return "VibeVoice-ASR (microsoft/VibeVoice-ASR-HF)";
+    }
+
+    const selected = elements.inputModel.selectedOptions && elements.inputModel.selectedOptions[0];
+    const modelLabel = selected ? selected.textContent.trim() : elements.inputModel.value;
+    return `Whisper ${modelLabel} / ${elements.inputDevice.value} / ${elements.inputCompute.value}`;
+}
+
+function formatModelStatusLabel(data) {
+    const parts = [data.engine_label || data.engine_key || "Modelo local"];
+    if (data.device) parts.push(data.device);
+    if (data.compute_type) parts.push(data.compute_type);
+    return parts.join(" / ");
 }
 
 // Salva e carrega configurações locais (LocalStorage)
@@ -233,7 +354,7 @@ function loadSettingsFromStorage() {
             elements.whisperPrompt.value = settings.whisperPrompt || "";
             
             // Novos campos VibeVoice
-            elements.vibevoiceChunkSize.value = settings.vibevoiceChunkSize || 45;
+            elements.vibevoiceChunkSize.value = settings.vibevoiceChunkSize || 60;
             elements.vibevoiceTemperature.value = settings.vibevoiceTemperature || "0.0";
             elements.vibevoiceRepetitionPenalty.value = settings.vibevoiceRepetitionPenalty || "1.1";
             elements.vibevoiceTopP.value = settings.vibevoiceTopP || "1.0";
@@ -567,6 +688,13 @@ function setupActions() {
             elements.ttsRepValue.textContent = e.target.value;
         });
     }
+    if (elements.inputTtsModel) {
+        elements.inputTtsModel.addEventListener("change", () => {
+            if (elements.inputTtsModel.value !== "realtime_0_5b") {
+                state.lastLongformTtsModel = elements.inputTtsModel.value;
+            }
+        });
+    }
 
     // Alternância de Abas TTS internas
     const ttsTabBtns = document.querySelectorAll(".tts-tab-btn");
@@ -579,10 +707,21 @@ function setupActions() {
             document.querySelectorAll(".tts-mode-panel").forEach(p => p.style.display = "none");
             
             if (mode === "single") {
+                if (elements.inputTtsModel.value === "realtime_0_5b") {
+                    elements.inputTtsModel.value = state.lastLongformTtsModel || "tts_1_5b";
+                }
                 document.getElementById("tts-panel-single").style.display = "block";
             } else if (mode === "dialog") {
+                if (elements.inputTtsModel.value === "realtime_0_5b") {
+                    elements.inputTtsModel.value = state.lastLongformTtsModel || "tts_1_5b";
+                }
                 document.getElementById("tts-panel-dialog").style.display = "block";
             } else if (mode === "chat") {
+                if (elements.inputTtsModel.value !== "realtime_0_5b") {
+                    state.lastLongformTtsModel = elements.inputTtsModel.value;
+                }
+                elements.inputTtsModel.value = "realtime_0_5b";
+                setTtsEngineStatus(elements.ttsEngineStatusChat, "Modelo em uso", "VibeVoice-Realtime-0.5B", false);
                 document.getElementById("tts-panel-chat").style.display = "block";
                 initTtsWebSocket();
             }
@@ -600,9 +739,17 @@ function setupActions() {
             
             elements.btnGenerateTts.disabled = true;
             elements.btnGenerateTts.textContent = "Sintetizando... ⏳";
+            setTtsEngineStatus(elements.ttsEngineStatusSingle, "Solicitado", getSelectedTtsModelLabel(), false);
+            logClientEvent("tts_single_requested", {
+                details: {
+                    text_length: text.length,
+                    requested_model: elements.inputTtsModel.value
+                }
+            });
             
             const formData = new FormData();
             formData.append("text", text);
+            formData.append("tts_model", elements.inputTtsModel.value);
             formData.append("speaker_id", elements.inputTtsSpeaker.value);
             formData.append("temperature", elements.inputTtsTemp.value);
             formData.append("repetition_penalty", elements.inputTtsRepPenalty.value);
@@ -614,7 +761,11 @@ function setupActions() {
                     body: formData
                 });
                 
-                if (!response.ok) throw new Error("Erro na geração do áudio.");
+                if (!response.ok) {
+                    throw new Error(await readErrorMessage(response, "Erro na geração do áudio."));
+                }
+                const engineLabel = response.headers.get("X-Escriba-TTS-Engine") || getSelectedTtsModelLabel();
+                const fallbackUsed = response.headers.get("X-Escriba-TTS-Fallback") === "true";
                 
                 const blob = await response.blob();
                 const audioUrl = URL.createObjectURL(blob);
@@ -623,10 +774,25 @@ function setupActions() {
                 elements.btnDownloadTtsSingle.href = audioUrl;
                 
                 elements.ttsResultSingle.style.display = "block";
+                setTtsEngineStatus(
+                    elements.ttsEngineStatusSingle,
+                    fallbackUsed ? "Fallback em uso" : "Modelo em uso",
+                    engineLabel,
+                    fallbackUsed
+                );
+                logClientEvent("tts_single_completed", {
+                    details: {
+                        engine_label: engineLabel,
+                        fallback: fallbackUsed,
+                        output_bytes: blob.size
+                    }
+                });
                 showToast("Voz sintetizada com sucesso!");
             } catch (err) {
                 console.error(err);
-                showToast("Falha ao gerar síntese de voz.", true);
+                setTtsEngineStatus(elements.ttsEngineStatusSingle, "Falha", err.message || "Erro na geração", true);
+                logClientEvent("tts_single_error", { severity: "error", message: err.message });
+                showToast(err.message || "Falha ao gerar síntese de voz.", true);
             } finally {
                 elements.btnGenerateTts.disabled = false;
                 elements.btnGenerateTts.textContent = "🔊 Sintetizar Voz";
@@ -645,9 +811,17 @@ function setupActions() {
             
             elements.btnGenerateDialog.disabled = true;
             elements.btnGenerateDialog.textContent = "Processando Diálogo... ⏳";
+            setTtsEngineStatus(elements.ttsEngineStatusDialog, "Solicitado", getSelectedTtsModelLabel(), false);
+            logClientEvent("tts_dialog_requested", {
+                details: {
+                    text_length: text.length,
+                    requested_model: elements.inputTtsModel.value
+                }
+            });
             
             const formData = new FormData();
             formData.append("text", text);
+            formData.append("tts_model", elements.inputTtsModel.value);
             formData.append("speaker_id", elements.inputTtsSpeaker.value);
             formData.append("temperature", elements.inputTtsTemp.value);
             formData.append("repetition_penalty", elements.inputTtsRepPenalty.value);
@@ -659,7 +833,11 @@ function setupActions() {
                     body: formData
                 });
                 
-                if (!response.ok) throw new Error("Erro na geração do diálogo.");
+                if (!response.ok) {
+                    throw new Error(await readErrorMessage(response, "Erro na geração do diálogo."));
+                }
+                const engineLabel = response.headers.get("X-Escriba-TTS-Engine") || getSelectedTtsModelLabel();
+                const fallbackUsed = response.headers.get("X-Escriba-TTS-Fallback") === "true";
                 
                 const blob = await response.blob();
                 const audioUrl = URL.createObjectURL(blob);
@@ -668,10 +846,25 @@ function setupActions() {
                 elements.btnDownloadTtsDialog.href = audioUrl;
                 
                 elements.ttsResultDialog.style.display = "block";
+                setTtsEngineStatus(
+                    elements.ttsEngineStatusDialog,
+                    fallbackUsed ? "Fallback em uso" : "Modelo em uso",
+                    engineLabel,
+                    fallbackUsed
+                );
+                logClientEvent("tts_dialog_completed", {
+                    details: {
+                        engine_label: engineLabel,
+                        fallback: fallbackUsed,
+                        output_bytes: blob.size
+                    }
+                });
                 showToast("Diálogo sintetizado com sucesso!");
             } catch (err) {
                 console.error(err);
-                showToast("Falha ao gerar diálogo.", true);
+                setTtsEngineStatus(elements.ttsEngineStatusDialog, "Falha", err.message || "Erro na geração", true);
+                logClientEvent("tts_dialog_error", { severity: "error", message: err.message });
+                showToast(err.message || "Falha ao gerar diálogo.", true);
             } finally {
                 elements.btnGenerateDialog.disabled = false;
                 elements.btnGenerateDialog.textContent = "👥 Gerar Conversa Completa";
@@ -728,7 +921,22 @@ function setupActions() {
                 const data = JSON.parse(event.data);
                 if (data.type === "stream_end") {
                     console.log("Fim do bloco de voz.");
+                } else if (data.type === "engine_status") {
+                    setTtsEngineStatus(
+                        elements.ttsEngineStatusChat,
+                        data.fallback ? "Fallback em uso" : "Modelo em uso",
+                        data.engine_label || "VibeVoice-Realtime-0.5B",
+                        Boolean(data.fallback)
+                    );
+                    logClientEvent("tts_chat_engine_status", {
+                        details: {
+                            engine_label: data.engine_label,
+                            fallback: Boolean(data.fallback)
+                        }
+                    });
                 } else if (data.type === "error") {
+                    setTtsEngineStatus(elements.ttsEngineStatusChat, "Falha", data.message || "Erro no streaming", true);
+                    logClientEvent("tts_chat_error", { severity: "error", message: data.message });
                     showToast("Erro do assistente: " + data.message, true);
                 }
             } else if (event.data instanceof ArrayBuffer) {
@@ -770,6 +978,13 @@ function setupActions() {
                 repetition_penalty: parseFloat(elements.inputTtsRepPenalty.value),
                 speed: parseFloat(elements.inputTtsSpeed.value)
             };
+            setTtsEngineStatus(elements.ttsEngineStatusChat, "Solicitado", "VibeVoice-Realtime-0.5B", false);
+            logClientEvent("tts_chat_requested", {
+                details: {
+                    text_length: inputVal.length,
+                    requested_model: "realtime_0_5b"
+                }
+            });
             
             // Se o socket estiver abrindo, aguarda e envia
             if (ttsWs.readyState === WebSocket.CONNECTING) {
@@ -830,6 +1045,7 @@ async function startTranscriptionWorkflow() {
     
     // Desabilitar controles e botões durante processamento
     setUIBusy(true);
+    elements.transcribeActionArea.style.display = "flex";
     elements.progressContainer.style.display = "block";
     const engineName = elements.inputEngine.value === "vibevoice" ? "VibeVoice" : "Whisper";
     elements.progressStatus.textContent = `Enviando arquivo ao ${engineName}...`;
@@ -837,6 +1053,15 @@ async function startTranscriptionWorkflow() {
     elements.progressPercentage.textContent = "0%";
     elements.transcriptSegmentsList.innerHTML = "";
     elements.dualWorkspace.style.display = "none";
+    setModelStatus(elements.asrModelStatus, "Solicitado", getSelectedAsrModelLabel(), false);
+    logClientEvent("transcription_requested", {
+        details: {
+            active_mode: state.activeMode,
+            engine: elements.inputEngine.value,
+            file_size: state.selectedFile ? state.selectedFile.size : null,
+            file_type: state.selectedFile ? state.selectedFile.type : null
+        }
+    });
     
     startTimer();
     
@@ -915,8 +1140,10 @@ async function startTranscriptionWorkflow() {
             return; // O tratador de clique ja cuida de limpar a UI
         }
         console.error("Erro na requisição de transcrição:", error);
+        logClientEvent("transcription_request_error", { severity: "error", message: error.message });
         showToast(error.message || "Erro desconhecido durante transcrição.", true);
         elements.progressStatus.textContent = "Ocorreu um erro no processamento.";
+        setModelStatus(elements.asrModelStatus, "Falha", error.message || "Erro no modelo", true);
         stopTimer();
         setUIBusy(false);
     }
@@ -924,7 +1151,23 @@ async function startTranscriptionWorkflow() {
 }
 
 function handleSSEPayload(data) {
-    if (data.type === "status") {
+    if (data.type === "model_status") {
+        setModelStatus(
+            elements.asrModelStatus,
+            data.caption || (data.fallback ? "Fallback em uso" : "Modelo em uso"),
+            formatModelStatusLabel(data),
+            Boolean(data.fallback)
+        );
+        logClientEvent("transcription_model_status", {
+            details: {
+                engine_label: data.engine_label,
+                device: data.device,
+                compute_type: data.compute_type,
+                fallback: Boolean(data.fallback)
+            }
+        });
+    }
+    else if (data.type === "status") {
         elements.progressStatus.textContent = data.message;
     }
     else if (data.type === "download_progress") {
@@ -967,6 +1210,11 @@ function handleSSEPayload(data) {
         elements.progressStatus.textContent = "Transcrição concluída com sucesso!";
         elements.progressBarFill.style.width = "100%";
         elements.progressPercentage.textContent = "100%";
+        logClientEvent("transcription_completed", {
+            details: {
+                segment_count: Array.isArray(data.full_transcript) ? data.full_transcript.length : 0
+            }
+        });
         showToast("Sucesso! Áudio transcrevido.");
         
         // Exibe o painel duplo
@@ -982,6 +1230,8 @@ function handleSSEPayload(data) {
         stopTimer();
         setUIBusy(false);
         elements.progressStatus.textContent = `Erro: ${data.message}`;
+        setModelStatus(elements.asrModelStatus, "Falha", data.message || "Erro no modelo", true);
+        logClientEvent("transcription_stream_error", { severity: "error", message: data.message });
         showToast(`Erro na transcrição: ${data.message}`, true);
     }
 }
@@ -1190,7 +1440,7 @@ function downloadTranscriptTxt() {
 
 
 function setupInputModes() {
-    const tabs = document.querySelectorAll(".tab-btn");
+    const tabs = document.querySelectorAll("#asr-workspace-container .tab-btn:not(.tts-tab-btn)");
     tabs.forEach(tab => {
         tab.addEventListener("click", () => {
             tabs.forEach(t => t.classList.remove("active"));
@@ -1215,6 +1465,7 @@ function setupInputModes() {
             
             // Exibe o painel do modo selecionado
             if (mode === "file") {
+                setModelStatus(elements.asrModelStatus, "Modelo em uso", "Aguardando transcrição", false);
                 if (state.selectedFile) {
                     elements.activeFileBanner.style.display = "flex";
                     elements.transcribeActionArea.style.display = "flex";
@@ -1222,8 +1473,10 @@ function setupInputModes() {
                     elements.dropZone.style.display = "flex";
                 }
             } else if (mode === "record") {
+                setModelStatus(elements.asrModelStatus, "Modelo em uso", "Aguardando transcrição", false);
                 elements.micRecordPanel.style.display = "flex";
             } else if (mode === "live") {
+                setModelStatus(elements.asrLiveModelStatus, "Modelo em uso", "Aguardando transmissão", false);
                 elements.micLivePanel.style.display = "flex";
             }
         });
@@ -1271,6 +1524,7 @@ function setupMicRecord() {
             state.isRecordingPaused = false;
             elements.recordingTimer.textContent = "00:00";
             elements.micRecordStatus.textContent = "🔴 Gravando áudio local...";
+            logClientEvent("microphone_recording_started");
             
             elements.btnStartMicRecord.style.display = "none";
             elements.btnPauseMicRecord.style.display = "inline-flex";
@@ -1289,6 +1543,7 @@ function setupMicRecord() {
             
         } catch (err) {
             console.error("Erro ao acessar microfone para gravação:", err);
+            logClientEvent("microphone_recording_error", { severity: "error", message: err.message });
             showToast("Não foi possível acessar o microfone.", true);
         }
     });
@@ -1311,6 +1566,11 @@ function setupMicRecord() {
     
     elements.btnStopMicRecord.addEventListener("click", () => {
         if (state.mediaRecorder && state.mediaRecorder.state !== "inactive") {
+            logClientEvent("microphone_recording_stopped", {
+                details: {
+                    duration_seconds: state.recordingSeconds
+                }
+            });
             state.mediaRecorder.stop();
             // Para as tracks do microfone
             state.mediaRecorder.stream.getTracks().forEach(track => track.stop());
@@ -1334,6 +1594,13 @@ function setupMicLive() {
             
             elements.micLiveStatus.textContent = "Conectando ao servidor de streaming...";
             elements.btnStartMicLive.disabled = true;
+            state.liveStopping = false;
+            setModelStatus(elements.asrLiveModelStatus, "Solicitado", getSelectedAsrModelLabel(), false);
+            logClientEvent("live_transcription_requested", {
+                details: {
+                    chunk_size_seconds: parseInt(elements.inputChunkSize.value) || 5
+                }
+            });
             
             state.liveSocket = new WebSocket(wsUrl);
             
@@ -1363,32 +1630,40 @@ function setupMicLive() {
                     if (data.type === "status") {
                         elements.micLiveStatus.textContent = data.message;
                     }
+                    else if (data.type === "model_status") {
+                        setModelStatus(
+                            elements.asrLiveModelStatus,
+                            data.caption || (data.fallback ? "Fallback em uso" : "Modelo em uso"),
+                            formatModelStatusLabel(data),
+                            Boolean(data.fallback)
+                        );
+                        logClientEvent("live_transcription_model_status", {
+                            details: {
+                                engine_label: data.engine_label,
+                                device: data.device,
+                                compute_type: data.compute_type,
+                                fallback: Boolean(data.fallback)
+                            }
+                        });
+                    }
                     else if (data.type === "ready") {
                         elements.micLiveStatus.textContent = "⚡ Transmitindo áudio... Fale agora!";
+                        logClientEvent("live_transcription_ready");
                         elements.btnStartMicLive.style.display = "none";
                         elements.btnStartMicLive.disabled = false;
                         elements.btnStopMicLive.style.display = "inline-flex";
                         
                         // Inicia gravação contínua em fatias
                         const chunkSizeSec = parseInt(elements.inputChunkSize.value) || 5;
-                        state.liveMediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-                        
-                        state.liveMediaRecorder.ondataavailable = async (e) => {
-                            if (e.data && e.data.size > 0 && state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
-                                // Envia os bytes binários do chunk de áudio diretamente pelo socket
-                                const arrayBuffer = await e.data.arrayBuffer();
-                                state.liveSocket.send(arrayBuffer);
-                            }
-                        };
-                        
-                        // Grava em fatias no tempo configurado
-                        state.liveMediaRecorder.start(chunkSizeSec * 1000);
+                        startLiveChunkRecorder(stream, chunkSizeSec);
                     }
                     else if (data.type === "progress") {
                         // O servidor retorna a lista completa de segmentos a cada chunk processado
                         renderFinalTranscript(data.segments);
                     }
                     else if (data.type === "error") {
+                        setModelStatus(elements.asrLiveModelStatus, "Falha", data.message || "Erro no modelo", true);
+                        logClientEvent("live_transcription_error", { severity: "error", message: data.message });
                         showToast(data.message, true);
                         stopLiveStreaming(stream);
                     }
@@ -1403,13 +1678,17 @@ function setupMicLive() {
             };
             
             state.liveSocket.onerror = (err) => {
-                console.error("Erro no WebSocket:", err);
-                showToast("Erro de conexão com o servidor.", true);
-                stopLiveStreaming(stream);
+            console.error("Erro no WebSocket:", err);
+            setModelStatus(elements.asrLiveModelStatus, "Falha", "Erro de conexão com o servidor", true);
+            logClientEvent("live_websocket_error", { severity: "error", message: "Erro de conexão com o servidor." });
+            showToast("Erro de conexão com o servidor.", true);
+            stopLiveStreaming(stream);
             };
             
         } catch (err) {
             console.error("Erro ao iniciar microfone para tempo real:", err);
+            setModelStatus(elements.asrLiveModelStatus, "Falha", "Microfone indisponível", true);
+            logClientEvent("live_microphone_error", { severity: "error", message: err.message });
             showToast("Não foi possível acessar o microfone para tempo real.", true);
             elements.btnStartMicLive.disabled = false;
             elements.btnStartMicLive.style.display = "inline-flex";
@@ -1426,11 +1705,19 @@ function setupMicLive() {
 }
 
 function stopLiveStreaming(stream = null) {
+    state.liveStopping = true;
     elements.btnStartMicLive.style.display = "inline-flex";
     elements.btnStartMicLive.disabled = false;
     elements.btnStopMicLive.style.display = "none";
     elements.micLiveStatus.textContent = "Transmissão encerrada.";
-    
+    setModelStatus(elements.asrLiveModelStatus, "Encerrado", "Nenhum modelo rodando", false);
+    logClientEvent("live_transcription_stopped");
+
+    if (state.liveChunkTimer) {
+        clearTimeout(state.liveChunkTimer);
+        state.liveChunkTimer = null;
+    }
+
     if (state.liveMediaRecorder && state.liveMediaRecorder.state !== "inactive") {
         try {
             state.liveMediaRecorder.stop();
@@ -1452,6 +1739,33 @@ function stopLiveStreaming(stream = null) {
     }
     
     state.liveMediaRecorder = null;
+}
+
+function startLiveChunkRecorder(stream, chunkSizeSec) {
+    if (state.liveStopping || !state.liveSocket || state.liveSocket.readyState !== WebSocket.OPEN) return;
+
+    const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+    state.liveMediaRecorder = recorder;
+
+    recorder.ondataavailable = async (e) => {
+        if (e.data && e.data.size > 0 && state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
+            const arrayBuffer = await e.data.arrayBuffer();
+            state.liveSocket.send(arrayBuffer);
+        }
+    };
+
+    recorder.onstop = () => {
+        if (!state.liveStopping && state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
+            startLiveChunkRecorder(stream, chunkSizeSec);
+        }
+    };
+
+    recorder.start();
+    state.liveChunkTimer = setTimeout(() => {
+        if (recorder.state !== "inactive") {
+            recorder.stop();
+        }
+    }, chunkSizeSec * 1000);
 }
 
 // --- DICIONÁRIO DE AJUDA DETALHADA E LOGICA DO MODAL ---
@@ -1573,12 +1887,12 @@ const helpTopics = {
         `
     },
     vibevoice_chunk_size: {
-        title: "Tamanho da Fatia (VibeVoice)",
+        title: "Janela Interna do Tokenizer (VibeVoice)",
         content: `
-            <p>Comprimento dos pedaços de áudio (em segundos) enviados sequencialmente ao modelo VibeVoice:</p>
+            <p>Controla a janela interna usada pelo tokenizer acústico do VibeVoice durante uma transcrição em passagem única:</p>
             <ul>
-                <li><strong>Padrão: 45 segundos.</strong></li>
-                <li>Como o VibeVoice é um modelo autoregressivo pesado, tentar transcrever áudios longos (de mais de 5 minutos) de uma só vez causa latência gigantesca na GPU RTX 3050 Laptop (6GB VRAM) devido ao prefill de contexto. Fatiar em pedaços menores zera o prefill para menos de 1 segundo por fatia, permitindo processamento fluído.</li>
+                <li><strong>Padrão: 60 segundos.</strong></li>
+                <li>Valores menores reduzem picos de memória. O áudio não é quebrado em transcrições separadas; o modelo mantém a diarização e o contexto global.</li>
             </ul>
         `
     },
@@ -1653,8 +1967,9 @@ const helpTopics = {
         content: `
             <p>Selecione o motor neural para geração de voz:</p>
             <ul>
-                <li><strong>VibeVoice-TTS-1.5B (Long-form):</strong> Carregado em NF4 de 4 bits na GPU RTX 3050. Permite sintetizar textos gigantescos ou roteiros de diálogos com turnos naturais de conversação entre múltiplos falantes, preservando a coerência.</li>
-                <li><strong>VibeVoice-Realtime-0.5B (Realtime):</strong> Modelo ultraleve otimizado para baixíssima latência (tempo de resposta de ~250ms), focado em feedback imediato e conversações dinâmicas por chat de voz.</li>
+                <li><strong>VibeVoice-TTS-1.5B:</strong> modelo oficial de longa duração listado na coleção da Microsoft. É a opção padrão para textos longos e diálogos multi-falante.</li>
+                <li><strong>VibeVoice-Large:</strong> variante maior disponível em aoi-ot/VibeVoice-Large. É mais pesada, tem cerca de 18,7 GB e exige a biblioteca local VibeVoice para inferência.</li>
+                <li><strong>VibeVoice-Realtime-0.5B:</strong> modelo de um falante voltado a baixa latência e respostas curtas. A aba de chat usa este modo automaticamente.</li>
             </ul>
         `
     },

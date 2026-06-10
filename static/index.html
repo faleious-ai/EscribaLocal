@@ -17,7 +17,7 @@
                 <div class="logo-icon">✍️</div>
                 <div>
                     <h1>EscribaLocal</h1>
-                    <p class="subtitle">Transcrição de Alta Performance & Resumos de Áudio</p>
+                    <p class="subtitle">Transcrição de Alta Performance e Geração de Voz Local</p>
                 </div>
             </div>
             <!-- HARDWARE WIDGETS -->
@@ -226,10 +226,10 @@
                         <!-- VIBEVOICE CHUNK SIZE -->
                         <div class="config-group" style="margin-top: 15px;">
                             <div class="config-title">
-                                <label for="vibevoice-chunk-size">Tamanho da Fatia (Segundos): <span id="vibevoice-chunk-value">45</span>s</label>
+                                <label for="vibevoice-chunk-size">Janela Interna do Tokenizer: <span id="vibevoice-chunk-value">60</span>s</label>
                                 <button type="button" class="info-btn" data-info="vibevoice_chunk_size">i</button>
                             </div>
-                            <input type="range" id="vibevoice-chunk-size" min="15" max="90" value="45" step="5" class="form-range">
+                            <input type="range" id="vibevoice-chunk-size" min="15" max="90" value="60" step="5" class="form-range">
                         </div>
 
                         <!-- VIBEVOICE TEMPERATURE -->
@@ -313,11 +313,13 @@
                                 <button type="button" class="info-btn" data-info="tts_model">i</button>
                             </div>
                             <select id="input-tts-model" class="form-select">
-                                <option value="tts_1_5b" selected>VibeVoice-TTS-1.5B (Longa Duração & Multi-Falante)</option>
+                                <option value="tts_1_5b" selected>VibeVoice-TTS-1.5B (Longa Duração / Multi-Falante)</option>
+                                <option value="tts_large">VibeVoice-Large (45 min / 18.7 GB / aoi-ot)</option>
                                 <option value="realtime_0_5b">VibeVoice-Realtime-0.5B (Tempo Real / Baixa Latência)</option>
                             </select>
                             <div class="recommendation-box">
-                                <strong>VibeVoice-TTS-1.5B:</strong> Ideal para converter textos longos ou diálogos.
+                                <strong>VibeVoice-TTS-1.5B:</strong> Modelo oficial de longa duração, indicado para textos longos e diálogos.
+                                <br><strong>VibeVoice-Large:</strong> Variante maior disponibilizada em aoi-ot/VibeVoice-Large; exige ambiente local com a biblioteca VibeVoice.
                                 <br><strong>Realtime-0.5B:</strong> Ideal para uso como assistente de voz e feedback imediato.
                             </div>
                         </div>
@@ -412,6 +414,10 @@
                             <button class="btn btn-primary btn-large" id="btn-start-mic-live" style="width: auto;">🎙️ Iniciar Transmissão Ao Vivo</button>
                             <button class="btn btn-danger btn-large" id="btn-stop-mic-live" style="display: none; width: auto;">⏹️ Encerrar Transmissão</button>
                         </div>
+                        <div class="model-status" id="asr-live-model-status" data-fallback="false">
+                            <span>Modelo em uso</span>
+                            <strong>Aguardando transmissão</strong>
+                        </div>
                     </div>
 
                     <!-- ACTIVE FILE BANNER -->
@@ -431,6 +437,10 @@
                         <button class="btn btn-primary btn-large" id="btn-start-transcription">
                             🚀 Iniciar Transcrição de Alta Performance
                         </button>
+                        <div class="model-status" id="asr-model-status" data-fallback="false">
+                            <span>Modelo em uso</span>
+                            <strong>Aguardando transcrição</strong>
+                        </div>
                         
                         <div class="progress-container" id="transcription-progress-container" style="display: none;">
                             <div class="progress-header">
@@ -490,9 +500,13 @@
                     <!-- TTS SINGLE SPEAKER WORKSPACE -->
                     <div class="tts-mode-panel" id="tts-panel-single">
                         <div class="tts-input-container" style="margin-top: 20px;">
-                            <textarea id="tts-input-text" placeholder="Digite o texto que você deseja transformar em voz com o VibeVoice-TTS-1.5B..." style="width: 100%; height: 120px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); padding: 12px; font-family: inherit; resize: none; outline: none;"></textarea>
+                            <textarea id="tts-input-text" placeholder="Digite o texto que você deseja transformar em voz com o VibeVoice..." style="width: 100%; height: 120px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); padding: 12px; font-family: inherit; resize: none; outline: none;"></textarea>
                             <div style="margin-top: 15px; display: flex; justify-content: flex-end;">
                                 <button class="btn btn-primary" id="btn-generate-tts">🔊 Sintetizar Voz</button>
+                            </div>
+                            <div class="tts-engine-status" id="tts-engine-status-single" data-fallback="false">
+                                <span>Modelo em uso</span>
+                                <strong>Aguardando geração</strong>
                             </div>
                         </div>
                         
@@ -512,9 +526,13 @@
                             <textarea id="tts-input-dialog" style="width: 100%; height: 150px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); padding: 12px; font-family: inherit; resize: none; outline: none;">Voz 1: Olá! Como está o desempenho dos modelos hoje?
 Voz 2: Está incrível! A RTX 3050 está gerando o áudio com baixíssima latência.
 Voz 1: Excelente. E os novos módulos separados de síntese de voz estão operando?
-Voz 2: Sim, os dois modelos VibeVoice de TTS e Realtime estão prontos.</textarea>
+Voz 2: Sim, os modelos VibeVoice de TTS, Large e Realtime estão prontos.</textarea>
                             <div style="margin-top: 15px; display: flex; justify-content: flex-end;">
                                 <button class="btn btn-primary" id="btn-generate-dialog">👥 Gerar Conversa Completa</button>
+                            </div>
+                            <div class="tts-engine-status" id="tts-engine-status-dialog" data-fallback="false">
+                                <span>Modelo em uso</span>
+                                <strong>Aguardando geração</strong>
                             </div>
                         </div>
                         
@@ -529,6 +547,10 @@ Voz 2: Sim, os dois modelos VibeVoice de TTS e Realtime estão prontos.</textare
 
                     <!-- TTS CHAT / ASSISTENTE WORKSPACE -->
                     <div class="tts-mode-panel" id="tts-panel-chat" style="display: none;">
+                        <div class="tts-engine-status" id="tts-engine-status-chat" data-fallback="false">
+                            <span>Modelo em uso</span>
+                            <strong>VibeVoice-Realtime-0.5B</strong>
+                        </div>
                         <div class="chat-container" style="margin-top: 20px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; height: 350px; display: flex; flex-direction: column; overflow: hidden;">
                             <div class="chat-messages" id="tts-chat-messages" style="flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;">
                                 <div class="chat-bubble assistant" style="background: rgba(0,242,254,0.08); padding: 10px 15px; border-radius: 12px 12px 12px 2px; align-self: flex-start; max-width: 80%; border: 1px solid rgba(0,242,254,0.15); font-size: 13px;">

@@ -10,4 +10,5 @@ transformers>=5.3.0
 bitsandbytes
 accelerate
 librosa
-
+scipy
+pywin32; platform_system == "Windows"

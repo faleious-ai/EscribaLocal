@@ -91,6 +91,48 @@ _current_compute_type = None
 # Fila para compartilhar eventos de download
 _download_queue = queue.Queue()
 
+
+def _whisper_status_payload(
+    model_name: str,
+    device: str,
+    compute_type: str,
+    requested_device: str = None,
+    requested_compute_type: str = None,
+    caption: str = "Modelo em uso"
+) -> Dict[str, Any]:
+    fallback = False
+    if requested_device and requested_device != device:
+        fallback = True
+    if requested_compute_type and requested_compute_type != compute_type:
+        fallback = True
+
+    return {
+        "type": "model_status",
+        "caption": "Fallback em uso" if fallback else caption,
+        "engine_key": model_name,
+        "engine_label": f"Whisper {model_name} (faster-whisper)",
+        "device": device,
+        "compute_type": compute_type,
+        "fallback": fallback,
+    }
+
+
+def get_whisper_runtime_status(
+    requested_model: str = None,
+    requested_device: str = None,
+    requested_compute_type: str = None
+) -> Dict[str, Any]:
+    model_name = _current_model_name or requested_model or "Whisper"
+    device = _current_device or requested_device or "auto"
+    compute_type = _current_compute_type or requested_compute_type or "auto"
+    return _whisper_status_payload(
+        model_name=model_name,
+        device=device,
+        compute_type=compute_type,
+        requested_device=requested_device,
+        requested_compute_type=requested_compute_type,
+    )
+
 # Salva as referências originais dos métodos da classe tqdm.tqdm
 _original_tqdm_update = tqdm.tqdm.update
 _original_tqdm_init = tqdm.tqdm.__init__
@@ -270,6 +312,11 @@ def transcribe_audio_generator(
         }
 
         model = get_whisper_model(model_name, device, compute_type, cpu_threads)
+        yield get_whisper_runtime_status(
+            requested_model=model_name,
+            requested_device=device,
+            requested_compute_type=compute_type,
+        )
 
         
         logger.info(f"Iniciando decodificação de áudio via FFmpeg: {file_path}...")

@@ -1,5 +1,6 @@
 # EscribaLocal Backend - Alta Performance
 import os
+
 import json
 import uuid
 import psutil
@@ -7,10 +8,25 @@ import shutil
 import logging
 import asyncio
 import gc
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect
+import time
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from services.app_logging import (
+    APP_LOG_PATH,
+    EVENT_LOG_PATH,
+    configure_app_logging,
+    get_log_paths,
+    read_recent_log_lines,
+    record_app_event,
+    record_exception_event,
+    reset_request_id,
+    set_request_id,
+)
+
+configure_app_logging()
+
 import torch
 if not hasattr(torch, "float8_e8m0fnu"):
     setattr(torch, "float8_e8m0fnu", torch.float32)
@@ -25,17 +41,21 @@ try:
 except Exception as e:
     pass
 
-from services.transcriber import transcribe_audio_generator, get_whisper_model, decode_audio_bytes_ffmpeg
-from services.vibevoice_service import transcribe_vibevoice_generator, unload_vibevoice_model
-from services.summarizer import generate_structured_minutes, generate_narrative_summary
-from services.vibevoice_tts_1_5b import generate_voice_1_5b, unload_tts_model
-from services.vibevoice_realtime_0_5b import generate_voice_stream_0_5b, unload_realtime_model
-
-logging.basicConfig(level=logging.INFO)
+from services.transcriber import (
+    decode_audio_bytes_ffmpeg,
+    get_whisper_model,
+    get_whisper_runtime_status,
+    transcribe_audio_generator,
+)
+from services.vibevoice_service import transcribe_vibevoice_generator
+from services.vibevoice_tts_1_5b import SUPPORTED_LONGFORM_TTS_MODELS, generate_voice_1_5b_with_metadata
+from services.vibevoice_realtime_0_5b import generate_voice_realtime_wav_with_metadata, generate_voice_stream_0_5b
 
 logger = logging.getLogger("EscribaLocal.Main")
 
 app = FastAPI(title="EscribaLocal - Transcrição de Áudio de Alta Performance")
+SYSTEM_STATUS_LOG_INTERVAL_SECONDS = 60
+_last_system_status_log_at = 0.0
 
 # Habilita CORS
 app.add_middleware(
@@ -45,6 +65,54 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next):
+    request_id = str(uuid.uuid4())
+    token = set_request_id(request_id)
+    started_at = time.perf_counter()
+    path = request.url.path
+
+    if path.startswith("/api"):
+        record_app_event(
+            "http_request_started",
+            request_id=request_id,
+            method=request.method,
+            path=path,
+            client_host=request.client.host if request.client else None,
+        )
+
+    try:
+        response = await call_next(request)
+        response.headers["X-Escriba-Request-ID"] = request_id
+        if path.startswith("/api"):
+            record_app_event(
+                "http_request_finished",
+                request_id=request_id,
+                method=request.method,
+                path=path,
+                status_code=response.status_code,
+                duration_ms=round((time.perf_counter() - started_at) * 1000, 1),
+            )
+        return response
+    except Exception as exc:
+        record_exception_event(
+            "http_request_error",
+            exc,
+            request_id=request_id,
+            method=request.method,
+            path=path,
+            duration_ms=round((time.perf_counter() - started_at) * 1000, 1),
+        )
+        raise
+    finally:
+        reset_request_id(token)
+
+
+@app.on_event("startup")
+async def log_app_startup():
+    record_app_event("app_startup", **get_log_paths())
 
 # Cria a pasta de arquivos estáticos e uploads temporários
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "temp_uploads")
@@ -143,7 +211,65 @@ async def get_system_status():
             status["gpu"]["available"] = True
             status["gpu"]["name"] = "NVIDIA GPU (CUDA Ativo)"
 
+    global _last_system_status_log_at
+    now = time.monotonic()
+    if now - _last_system_status_log_at >= SYSTEM_STATUS_LOG_INTERVAL_SECONDS:
+        _last_system_status_log_at = now
+        record_app_event(
+            "system_status_snapshot",
+            cpu_percent=status["cpu"]["percent"],
+            ram_used_percent=status["ram"]["used_percent"],
+            ram_free_gb=status["ram"]["free_gb"],
+            gpu_available=status["gpu"]["available"],
+            gpu_name=status["gpu"]["name"],
+            gpu_vram_allocated_mb=status["gpu"]["vram_allocated_mb"],
+            gpu_vram_total_mb=status["gpu"]["vram_total_mb"],
+        )
+
     return status
+
+
+@app.get("/api/logs/status")
+async def get_logs_status():
+    paths = get_log_paths()
+    return {
+        "paths": paths,
+        "sizes_bytes": {
+            "app_log": APP_LOG_PATH.stat().st_size if APP_LOG_PATH.exists() else 0,
+            "event_log": EVENT_LOG_PATH.stat().st_size if EVENT_LOG_PATH.exists() else 0,
+        }
+    }
+
+
+@app.get("/api/logs/recent")
+async def get_recent_logs(kind: str = "events", max_lines: int = 250):
+    log_path = EVENT_LOG_PATH if kind == "events" else APP_LOG_PATH
+    lines = [line.rstrip("\n") for line in read_recent_log_lines(log_path, max_lines=max_lines)]
+    return {
+        "kind": "events" if kind == "events" else "app",
+        "path": str(log_path),
+        "lines": lines,
+    }
+
+
+@app.post("/api/client-log")
+async def client_log(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {"event_type": "client_log_parse_error"}
+
+    record_app_event(
+        "client_event",
+        client_event_type=payload.get("event_type", "client_event"),
+        severity=payload.get("severity", "info"),
+        message=payload.get("message"),
+        source=payload.get("source"),
+        page=payload.get("page"),
+        model=payload.get("model"),
+        details=payload.get("details", {}),
+    )
+    return {"ok": True}
 
 @app.post("/api/transcribe")
 async def transcribe_audio(
@@ -177,8 +303,20 @@ async def transcribe_audio(
         logger.info(f"Arquivo temporario Whisper salvo em: {temp_file_path} (Tamanho: {file_size} bytes)")
         if file_size == 0:
             raise Exception("O arquivo salvo tem 0 bytes.")
+        record_app_event(
+            "transcription_request_received",
+            engine="whisper",
+            model=model,
+            device=device,
+            compute_type=compute_type,
+            file_ext=ext,
+            file_size_bytes=file_size,
+            language=language,
+            vad_filter=vad_filter,
+        )
     except Exception as e:
         logger.error(f"Erro ao salvar arquivo temporario Whisper: {e}")
+        record_exception_event("transcription_upload_error", e, engine="whisper", file_ext=ext)
         raise HTTPException(status_code=500, detail=f"Falha ao salvar arquivo enviado: {str(e)}")
 
     # Definição do gerador assíncrono para streaming via SSE
@@ -199,32 +337,34 @@ async def transcribe_audio(
             temperature=whisper_temperature
         )
         
-        full_segments = []
-        
         try:
             while True:
                 # Executa o next() do gerador síncrono em um thread pool para evitar congelamento
                 chunk = await loop.run_in_executor(None, lambda: next(sync_generator, None))
                 if chunk is None:
                     break
-                
-                # Se for o fim ou dados úteis, captura
-                if chunk.get("type") == "done":
-                    full_segments = chunk.get("full_transcript", [])
-                    # Gera a evolução clínica no fim da transcrição do Whisper
-                    structured_draft = generate_structured_minutes(full_segments)
-                    narrative_draft = generate_narrative_summary(full_segments)
-                    yield f"data: {json.dumps({'type': 'audio_summary', 'structured': structured_draft, 'narrative': narrative_draft})}\n\n"
-                    await asyncio.sleep(0.01)
+
+                if chunk.get("type") == "model_status":
+                    record_app_event("transcription_model_status", engine="whisper", **chunk)
+                elif chunk.get("type") == "done":
+                    record_app_event(
+                        "transcription_completed",
+                        engine="whisper",
+                        model=model,
+                        segment_count=len(chunk.get("full_transcript", [])),
+                    )
+                elif chunk.get("type") == "error":
+                    record_app_event("transcription_stream_error", engine="whisper", message=chunk.get("message"))
 
                 # Formata a saída no protocolo Server-Sent Events (SSE)
                 yield f"data: {json.dumps(chunk)}\n\n"
-                
+
                 # Pausa rápida para ceder controle ao event loop
                 await asyncio.sleep(0.01)
-                
+
         except Exception as err:
             logger.error(f"Erro no streaming SSE Whisper: {err}")
+            record_exception_event("transcription_stream_exception", err, engine="whisper", model=model)
             yield f"data: {json.dumps({'type': 'error', 'message': str(err)})}\n\n"
         finally:
             # Remoção física e segura do arquivo de áudio temporário após transcrição
@@ -269,8 +409,18 @@ async def transcribe_vibevoice(
         logger.info(f"Arquivo temporario VibeVoice salvo em: {temp_file_path} (Tamanho: {file_size} bytes)")
         if file_size == 0:
             raise Exception("O arquivo salvo tem 0 bytes.")
+        record_app_event(
+            "transcription_request_received",
+            engine="vibevoice_asr",
+            file_ext=ext,
+            file_size_bytes=file_size,
+            diarization=vibevoice_diarization,
+            tokenizer_window_seconds=vibevoice_chunk_size,
+            temperature=vibevoice_temperature,
+        )
     except Exception as e:
         logger.error(f"Erro ao salvar arquivo temporario VibeVoice: {e}")
+        record_exception_event("transcription_upload_error", e, engine="vibevoice_asr", file_ext=ext)
         raise HTTPException(status_code=500, detail=f"Falha ao salvar arquivo enviado: {str(e)}")
 
     async def sse_generator_vibevoice():
@@ -289,29 +439,29 @@ async def transcribe_vibevoice(
                 max_new_tokens=vibevoice_max_new_tokens
             )
             
-            full_segments = []
-            
             while True:
                 chunk = await loop.run_in_executor(None, lambda: next(vibevoice_gen, None))
                 if chunk is None:
                     break
+
+                if chunk.get("type") == "model_status":
+                    record_app_event("transcription_model_status", engine="vibevoice_asr", **chunk)
+                elif chunk.get("type") == "done":
+                    record_app_event(
+                        "transcription_completed",
+                        engine="vibevoice_asr",
+                        segment_count=len(chunk.get("full_transcript", [])),
+                    )
+                elif chunk.get("type") == "error":
+                    record_app_event("transcription_stream_error", engine="vibevoice_asr", message=chunk.get("message"))
                 
-                if chunk.get("type") == "done":
-                    full_segments = chunk.get("full_transcript", [])
-                    # Ao concluir a transcrição por fatias do VibeVoice, gera rascunho de evolução clínica
-                    structured_draft = generate_structured_minutes(full_segments)
-                    narrative_draft = generate_narrative_summary(full_segments)
-                    yield f"data: {json.dumps({'type': 'audio_summary', 'structured': structured_draft, 'narrative': narrative_draft})}\n\n"
-                    await asyncio.sleep(0.01)
-                    
-                    yield f"data: {json.dumps({'type': 'done', 'full_transcript': full_segments})}\n\n"
-                else:
-                    yield f"data: {json.dumps(chunk)}\n\n"
+                yield f"data: {json.dumps(chunk)}\n\n"
                 
                 await asyncio.sleep(0.01)
                 
         except Exception as err:
             logger.error(f"Erro no streaming VibeVoice: {err}", exc_info=True)
+            record_exception_event("transcription_stream_exception", err, engine="vibevoice_asr")
             yield f"data: {json.dumps({'type': 'error', 'message': str(err)})}\n\n"
         finally:
             if os.path.exists(temp_file_path):
@@ -334,8 +484,9 @@ async def websocket_live_transcribe(websocket: WebSocket):
     await websocket.accept()
     logger.info("Cliente WebSocket conectado para transcrição ao vivo.")
     
-    audio_bytes_buffer = b""
     model = None
+    full_segments = []
+    live_offset_seconds = 0.0
     
     try:
         # Recebe configuração inicial do cliente
@@ -349,6 +500,16 @@ async def websocket_live_transcribe(websocket: WebSocket):
         language = config.get("language", "auto")
         vad_filter = config.get("vad_filter", True)
         cpu_threads = int(config.get("cpu_threads", 4))
+        record_app_event(
+            "live_transcription_requested",
+            model=model_name,
+            device=device,
+            compute_type=compute_type,
+            beam_size=beam_size,
+            language=language,
+            vad_filter=vad_filter,
+            cpu_threads=cpu_threads,
+        )
         
         await websocket.send_text(json.dumps({
             "type": "status",
@@ -361,6 +522,13 @@ async def websocket_live_transcribe(websocket: WebSocket):
             None,
             lambda: get_whisper_model(model_name, device, compute_type, cpu_threads)
         )
+        model_status = get_whisper_runtime_status(
+            requested_model=model_name,
+            requested_device=device,
+            requested_compute_type=compute_type
+        )
+        record_app_event("live_transcription_model_status", **model_status)
+        await websocket.send_text(json.dumps(model_status))
         
         await websocket.send_text(json.dumps({
             "type": "ready",
@@ -378,13 +546,10 @@ async def websocket_live_transcribe(websocket: WebSocket):
                 if not audio_bytes or len(audio_bytes) == 0:
                     continue
                 
-                # Acumula os bytes do contêiner de áudio continuamente
-                audio_bytes_buffer += audio_bytes
-                
-                # Decodifica o buffer inteiro acumulado via FFmpeg
+                # Cada blob recebido do cliente é um trecho de áudio fechado.
                 audio_data = await loop.run_in_executor(
                     None,
-                    lambda: decode_audio_bytes_ffmpeg(audio_bytes_buffer)
+                    lambda: decode_audio_bytes_ffmpeg(audio_bytes)
                 )
                 
                 if len(audio_data) == 0:
@@ -404,31 +569,49 @@ async def websocket_live_transcribe(websocket: WebSocket):
                     
                     segment_list = []
                     for s in segments:
+                        text = s.text.strip()
+                        if not text:
+                            continue
                         segment_list.append({
-                            "start": s.start,
-                            "end": s.end,
-                            "text": s.text.strip()
+                            "start": s.start + live_offset_seconds,
+                            "end": s.end + live_offset_seconds,
+                            "text": text
                         })
                     return segment_list
                 
                 segments_result = await loop.run_in_executor(None, run_whisper)
+                full_segments.extend(segments_result)
+                live_offset_seconds += len(audio_data) / 16000.0
+                if segments_result:
+                    record_app_event(
+                        "live_transcription_chunk_processed",
+                        new_segment_count=len(segments_result),
+                        total_segment_count=len(full_segments),
+                        offset_seconds=round(live_offset_seconds, 2),
+                    )
                 
                 # Envia de volta a lista atualizada de segmentos
                 await websocket.send_text(json.dumps({
                     "type": "progress",
-                    "segments": segments_result
+                    "segments": full_segments
                 }))
                 
             elif "text" in message:
                 payload = json.loads(message["text"])
                 if payload.get("action") == "stop":
                     logger.info("Cliente solicitou parada da transcrição ao vivo.")
+                    record_app_event(
+                        "live_transcription_stopped",
+                        total_segment_count=len(full_segments),
+                        offset_seconds=round(live_offset_seconds, 2),
+                    )
                     break
                     
     except WebSocketDisconnect:
         logger.info("WebSocket de transcrição ao vivo desconectado.")
     except Exception as e:
         logger.error(f"Erro na conexão de transcrição ao vivo: {e}", exc_info=True)
+        record_exception_event("live_transcription_error", e)
         try:
             await websocket.send_text(json.dumps({
                 "type": "error",
@@ -437,7 +620,6 @@ async def websocket_live_transcribe(websocket: WebSocket):
         except:
             pass
     finally:
-        audio_buffer = None
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -446,6 +628,7 @@ async def websocket_live_transcribe(websocket: WebSocket):
 @app.post("/api/tts/generate")
 async def tts_generate(
     text: str = Form(...),
+    tts_model: str = Form("tts_1_5b"),
     speaker_id: str = Form("speaker_1"),
     temperature: float = Form(0.7),
     top_p: float = Form(0.95),
@@ -454,15 +637,34 @@ async def tts_generate(
     speed: float = Form(1.0)
 ):
     """
-    Endpoint HTTP que gera áudio de longa duração a partir de um texto usando VibeVoice-TTS-1.5B.
+    Endpoint HTTP que gera áudio WAV a partir de texto usando o motor TTS selecionado.
     """
     import io
+    if tts_model not in SUPPORTED_LONGFORM_TTS_MODELS | {"realtime_0_5b"}:
+        raise HTTPException(status_code=400, detail="Modelo TTS inválido.")
     try:
+        record_app_event(
+            "tts_generate_requested",
+            requested_model=tts_model,
+            speaker_id=speaker_id,
+            text_length=len(text or ""),
+            temperature=temperature,
+            speed=speed,
+        )
         # Executa no thread pool para não bloquear
         loop = asyncio.get_running_loop()
-        wav_bytes = await loop.run_in_executor(
+        voice_result = await loop.run_in_executor(
             None,
-            lambda: generate_voice_1_5b(
+            lambda: generate_voice_1_5b_with_metadata(
+                text=text,
+                speaker_id=speaker_id,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                repetition_penalty=repetition_penalty,
+                speed=speed,
+                model_key=tts_model
+            ) if tts_model in SUPPORTED_LONGFORM_TTS_MODELS else generate_voice_realtime_wav_with_metadata(
                 text=text,
                 speaker_id=speaker_id,
                 temperature=temperature,
@@ -472,9 +674,24 @@ async def tts_generate(
                 speed=speed
             )
         )
-        return StreamingResponse(io.BytesIO(wav_bytes), media_type="audio/wav")
+        headers = {
+            "X-Escriba-TTS-Requested": tts_model,
+            "X-Escriba-TTS-Engine-Key": str(voice_result.get("engine_key", tts_model)),
+            "X-Escriba-TTS-Engine": str(voice_result.get("engine_label", tts_model)),
+            "X-Escriba-TTS-Fallback": "true" if voice_result.get("fallback") else "false",
+        }
+        record_app_event(
+            "tts_generate_completed",
+            requested_model=tts_model,
+            engine_key=voice_result.get("engine_key", tts_model),
+            engine_label=voice_result.get("engine_label", tts_model),
+            fallback=bool(voice_result.get("fallback")),
+            output_bytes=len(voice_result["wav_bytes"]),
+        )
+        return StreamingResponse(io.BytesIO(voice_result["wav_bytes"]), media_type="audio/wav", headers=headers)
     except Exception as e:
         logger.error(f"Erro na geração de áudio TTS: {e}")
+        record_exception_event("tts_generate_error", e, requested_model=tts_model)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -494,6 +711,12 @@ async def websocket_tts_stream(websocket: WebSocket):
             text = payload.get("text", "")
             if not text.strip():
                 continue
+            record_app_event(
+                "tts_stream_requested",
+                requested_model="realtime_0_5b",
+                text_length=len(text),
+                speaker_id=payload.get("speaker_id", "speaker_1"),
+            )
                 
             speaker_id = payload.get("speaker_id", "speaker_1")
             temperature = float(payload.get("temperature", 0.5))
@@ -505,31 +728,54 @@ async def websocket_tts_stream(websocket: WebSocket):
             # Executa a geração em pedaços e envia imediatamente em binário
             loop = asyncio.get_running_loop()
             
-            def run_stream():
-                return list(generate_voice_stream_0_5b(
-                    text=text,
-                    speaker_id=speaker_id,
-                    temperature=temperature,
-                    top_p=top_p,
-                    top_k=top_k,
-                    repetition_penalty=repetition_penalty,
-                    speed=speed
-                ))
-                
-            audio_chunks = await loop.run_in_executor(None, run_stream)
+            engine_info = {}
+            engine_status_sent = False
+
+            def capture_engine_status(info):
+                engine_info.update(info)
+
+            audio_iter = generate_voice_stream_0_5b(
+                text=text,
+                speaker_id=speaker_id,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                repetition_penalty=repetition_penalty,
+                speed=speed,
+                status_callback=capture_engine_status
+            )
             
             # Envia os chunks binários
-            for chunk in audio_chunks:
+            while True:
+                chunk = await loop.run_in_executor(None, lambda: next(audio_iter, None))
+                if engine_info and not engine_status_sent:
+                    record_app_event(
+                        "tts_stream_engine_status",
+                        engine_key=engine_info.get("engine_key", "realtime_0_5b"),
+                        engine_label=engine_info.get("engine_label", "VibeVoice-Realtime-0.5B"),
+                        fallback=bool(engine_info.get("fallback", False)),
+                    )
+                    await websocket.send_text(json.dumps({
+                        "type": "engine_status",
+                        "engine_key": engine_info.get("engine_key", "realtime_0_5b"),
+                        "engine_label": engine_info.get("engine_label", "VibeVoice-Realtime-0.5B"),
+                        "fallback": bool(engine_info.get("fallback", False))
+                    }))
+                    engine_status_sent = True
+                if chunk is None:
+                    break
                 await websocket.send_bytes(chunk)
                 await asyncio.sleep(0.01)
                 
             # Envia um marcador especial sinalizando fim do bloco
+            record_app_event("tts_stream_completed")
             await websocket.send_text(json.dumps({"type": "stream_end"}))
             
     except WebSocketDisconnect:
         logger.info("WebSocket de TTS Realtime desconectado.")
     except Exception as e:
         logger.error(f"Erro no WebSocket de TTS: {e}")
+        record_exception_event("tts_stream_error", e)
         try:
             await websocket.send_text(json.dumps({"type": "error", "message": str(e)}))
         except:

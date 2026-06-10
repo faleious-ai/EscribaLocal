@@ -18,6 +18,9 @@
     --accent-green: hsl(142, 70%, 45%);
     --accent-green-glow: hsla(142, 70%, 45%, 0.25);
     
+    --accent-warning: hsl(38, 92%, 55%);
+    --accent-warning-glow: hsla(38, 92%, 55%, 0.18);
+
     --accent-danger: hsl(350, 80%, 50%);
     
     --glass-blur: blur(12px);
@@ -212,6 +215,41 @@ body {
     background: var(--accent-green-glow);
     border: 1px solid var(--accent-green);
     color: var(--accent-green);
+}
+
+.model-status,
+.tts-engine-status {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-left: 3px solid var(--accent-cyan);
+    background: rgba(255, 255, 255, 0.025);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.model-status strong,
+.tts-engine-status strong {
+    color: var(--accent-cyan);
+    font-size: 12px;
+    font-weight: 700;
+    text-align: right;
+}
+
+.model-status[data-fallback="true"],
+.tts-engine-status[data-fallback="true"] {
+    border-left-color: var(--accent-warning);
+    background: var(--accent-warning-glow);
+}
+
+.model-status[data-fallback="true"] strong,
+.tts-engine-status[data-fallback="true"] strong {
+    color: var(--accent-warning);
 }
 
 .panel-body {
@@ -763,26 +801,6 @@ body {
     color: #fff;
     border-radius: 2px;
     padding: 0 2px;
-}
-
-/* Right Column Workspace (Audio Summary) */
-.summary-editor-container {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    padding: 20px;
-}
-
-.summary-editor-container textarea {
-    flex: 1;
-    background: transparent;
-    border: none;
-    outline: none;
-    resize: none;
-    color: var(--text-primary);
-    font-family: inherit;
-    font-size: 13.5px;
-    line-height: 1.7;
 }
 
 /* Toast */
