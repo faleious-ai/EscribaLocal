@@ -40,6 +40,8 @@ from services.transcriber import (
 from services.vibevoice_service import transcribe_vibevoice_generator
 from services.vibevoice_tts_1_5b import SUPPORTED_LONGFORM_TTS_MODELS, generate_voice_1_5b_with_metadata
 from services.vibevoice_realtime_0_5b import generate_voice_realtime_wav_with_metadata, generate_voice_stream_0_5b
+from services.jobs import JobState, job_manager
+from routers.jobs_routes import router as jobs_router
 
 logger = logging.getLogger("EscribaLocal.Main")
 
@@ -55,6 +57,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(jobs_router)
 
 
 @app.middleware("http")
@@ -261,8 +265,122 @@ async def client_log(request: Request):
     )
     return {"ok": True}
 
+def _transcription_sse_response(request: Request, job, make_generator, engine: str, model_label: str, temp_file_path: str):
+    """Envolve um gerador síncrono de transcrição num StreamingResponse SSE com job.
+
+    Responsabilidades: evento inicial {"type":"job"} (ignorado por clientes
+    antigos), fila de GPU (semáforo único — duas inferências pesadas
+    simultâneas estouram 6GB de VRAM), cancelamento por desconexão do cliente
+    e persistência do estado final no histórico.
+    """
+
+    async def sse_stream():
+        loop = asyncio.get_running_loop()
+        yield f"data: {json.dumps({'type': 'job', 'job_id': job.job_id})}\n\n"
+
+        stop_watcher = asyncio.Event()
+
+        async def watch_disconnect():
+            # Rede de segurança: aborto do fetch/fechamento da aba cancela o
+            # job mesmo com o worker bloqueado numa inferência longa.
+            while not stop_watcher.is_set():
+                if await request.is_disconnected():
+                    job_manager.cancel(job.job_id, reason="cliente desconectou")
+                    return
+                try:
+                    await asyncio.wait_for(stop_watcher.wait(), timeout=0.5)
+                except asyncio.TimeoutError:
+                    continue
+
+        watcher = asyncio.create_task(watch_disconnect())
+        final_state = None
+        error_message = None
+        gpu_acquired = False
+        try:
+            queued_notified = False
+            while not job.cancel_event.is_set():
+                gpu_acquired = await loop.run_in_executor(None, job_manager.try_acquire_gpu, job.job_id, 0.5)
+                if gpu_acquired:
+                    break
+                if not queued_notified:
+                    queued_notified = True
+                    waiting_event = {"type": "status", "message": "Na fila: aguardando outra tarefa pesada terminar..."}
+                    job_manager.publish(job.job_id, waiting_event)
+                    yield f"data: {json.dumps(waiting_event)}\n\n"
+
+            if job.cancel_event.is_set():
+                final_state = JobState.CANCELLED
+                yield f"data: {json.dumps({'type': 'cancelled', 'message': 'Tarefa cancelada antes do início.'})}\n\n"
+                return
+
+            job_manager.start(job.job_id)
+            sync_generator = make_generator(job.cancel_event)
+
+            while True:
+                chunk = await loop.run_in_executor(None, lambda: next(sync_generator, None))
+                if chunk is None:
+                    break
+                chunk_type = chunk.get("type")
+                job_manager.publish(job.job_id, chunk)
+
+                if chunk_type == "model_status":
+                    record_app_event("transcription_model_status", engine=engine, **chunk)
+                elif chunk_type == "done":
+                    final_state = JobState.COMPLETED
+                    record_app_event(
+                        "transcription_completed",
+                        engine=engine,
+                        model=model_label,
+                        segment_count=len(chunk.get("full_transcript", [])),
+                    )
+                elif chunk_type == "error":
+                    final_state = JobState.FAILED
+                    error_message = chunk.get("message")
+                    record_app_event("transcription_stream_error", engine=engine, message=chunk.get("message"))
+                elif chunk_type == "cancelled":
+                    final_state = JobState.CANCELLED
+                    record_app_event("transcription_cancelled", engine=engine, model=model_label)
+
+                yield f"data: {json.dumps(chunk)}\n\n"
+
+                if chunk_type == "cancelled":
+                    break
+                await asyncio.sleep(0.01)
+
+        except Exception as err:
+            final_state = JobState.FAILED
+            error_message = str(err)
+            logger.error(f"Erro no streaming SSE {engine}: {err}", exc_info=True)
+            record_exception_event("transcription_stream_exception", err, engine=engine, model=model_label)
+            yield f"data: {json.dumps({'type': 'error', 'message': str(err)})}\n\n"
+        finally:
+            stop_watcher.set()
+            watcher.cancel()
+            if gpu_acquired:
+                job_manager.release_gpu(job.job_id)
+            if final_state is None:
+                # Stream fechado sem desfecho (desconexão do cliente): garante
+                # a parada do worker e registra como cancelado.
+                job.cancel_event.set()
+                final_state = JobState.CANCELLED
+            job_manager.finish(job.job_id, final_state, error=error_message)
+            if os.path.exists(temp_file_path):
+                try:
+                    os.remove(temp_file_path)
+                    logger.info(f"Arquivo temporário removido: {temp_file_path}")
+                except Exception as cleanup_err:
+                    logger.warning(f"Não foi possível remover o arquivo temporário: {cleanup_err}")
+
+    return StreamingResponse(
+        sse_stream(),
+        media_type="text/event-stream",
+        headers={"X-Escriba-Job-ID": job.job_id},
+    )
+
+
 @app.post("/api/transcribe")
 async def transcribe_audio(
+    request: Request,
     file: UploadFile = File(...),
     model: str = Form("large-v3-turbo"),
     device: str = Form("cuda"),
@@ -309,12 +427,24 @@ async def transcribe_audio(
         record_exception_event("transcription_upload_error", e, engine="whisper", file_ext=ext)
         raise HTTPException(status_code=500, detail=f"Falha ao salvar arquivo enviado: {str(e)}")
 
-    # Definição do gerador assíncrono para streaming via SSE
-    async def sse_generator():
-        # Executa a tarefa pesada do Whisper em um pool de threads para não bloquear o event loop
-        loop = asyncio.get_running_loop()
-        
-        sync_generator = transcribe_audio_generator(
+    job = job_manager.create(
+        kind="transcribe_whisper",
+        params={
+            "model": model,
+            "device": device,
+            "compute_type": compute_type,
+            "beam_size": beam_size,
+            "language": language,
+            "vad_filter": vad_filter,
+            "cpu_threads": cpu_threads,
+            "whisper_prompt": whisper_prompt,
+            "temperature": whisper_temperature,
+        },
+        input_ref=temp_file_path,
+    )
+
+    def make_generator(cancel_event):
+        return transcribe_audio_generator(
             file_path=temp_file_path,
             model_name=model,
             device=device,
@@ -324,52 +454,19 @@ async def transcribe_audio(
             vad_filter=vad_filter,
             cpu_threads=cpu_threads,
             initial_prompt=whisper_prompt,
-            temperature=whisper_temperature
+            temperature=whisper_temperature,
+            cancel_event=cancel_event
         )
-        
-        try:
-            while True:
-                # Executa o next() do gerador síncrono em um thread pool para evitar congelamento
-                chunk = await loop.run_in_executor(None, lambda: next(sync_generator, None))
-                if chunk is None:
-                    break
 
-                if chunk.get("type") == "model_status":
-                    record_app_event("transcription_model_status", engine="whisper", **chunk)
-                elif chunk.get("type") == "done":
-                    record_app_event(
-                        "transcription_completed",
-                        engine="whisper",
-                        model=model,
-                        segment_count=len(chunk.get("full_transcript", [])),
-                    )
-                elif chunk.get("type") == "error":
-                    record_app_event("transcription_stream_error", engine="whisper", message=chunk.get("message"))
-
-                # Formata a saída no protocolo Server-Sent Events (SSE)
-                yield f"data: {json.dumps(chunk)}\n\n"
-
-                # Pausa rápida para ceder controle ao event loop
-                await asyncio.sleep(0.01)
-
-        except Exception as err:
-            logger.error(f"Erro no streaming SSE Whisper: {err}")
-            record_exception_event("transcription_stream_exception", err, engine="whisper", model=model)
-            yield f"data: {json.dumps({'type': 'error', 'message': str(err)})}\n\n"
-        finally:
-            # Remoção física e segura do arquivo de áudio temporário após transcrição
-            if os.path.exists(temp_file_path):
-                try:
-                    os.remove(temp_file_path)
-                    logger.info(f"Arquivo temporário Whisper removido: {temp_file_path}")
-                except Exception as cleanup_err:
-                    logger.warning(f"Não foi possível remover o arquivo temporário Whisper: {cleanup_err}")
-
-    return StreamingResponse(sse_generator(), media_type="text/event-stream")
+    return _transcription_sse_response(
+        request, job, make_generator,
+        engine="whisper", model_label=model, temp_file_path=temp_file_path,
+    )
 
 
 @app.post("/api/transcribe-vibevoice")
 async def transcribe_vibevoice(
+    request: Request,
     file: UploadFile = File(...),
     vibevoice_prompt: str = Form(None),
     vibevoice_diarization: bool = Form(True),
@@ -413,55 +510,41 @@ async def transcribe_vibevoice(
         record_exception_event("transcription_upload_error", e, engine="vibevoice_asr", file_ext=ext)
         raise HTTPException(status_code=500, detail=f"Falha ao salvar arquivo enviado: {str(e)}")
 
-    async def sse_generator_vibevoice():
-        loop = asyncio.get_running_loop()
-        try:
-            vibevoice_gen = transcribe_vibevoice_generator(
-                file_path=temp_file_path,
-                prompt=vibevoice_prompt,
-                diarization=vibevoice_diarization,
-                chunk_length_seconds=vibevoice_chunk_size,
-                temperature=vibevoice_temperature,
-                repetition_penalty=vibevoice_repetition_penalty,
-                top_p=vibevoice_top_p,
-                top_k=vibevoice_top_k,
-                num_beams=vibevoice_num_beams,
-                max_new_tokens=vibevoice_max_new_tokens
-            )
-            
-            while True:
-                chunk = await loop.run_in_executor(None, lambda: next(vibevoice_gen, None))
-                if chunk is None:
-                    break
+    job = job_manager.create(
+        kind="transcribe_vibevoice",
+        params={
+            "prompt": vibevoice_prompt,
+            "diarization": vibevoice_diarization,
+            "chunk_length_seconds": vibevoice_chunk_size,
+            "temperature": vibevoice_temperature,
+            "repetition_penalty": vibevoice_repetition_penalty,
+            "top_p": vibevoice_top_p,
+            "top_k": vibevoice_top_k,
+            "num_beams": vibevoice_num_beams,
+            "max_new_tokens": vibevoice_max_new_tokens,
+        },
+        input_ref=temp_file_path,
+    )
 
-                if chunk.get("type") == "model_status":
-                    record_app_event("transcription_model_status", engine="vibevoice_asr", **chunk)
-                elif chunk.get("type") == "done":
-                    record_app_event(
-                        "transcription_completed",
-                        engine="vibevoice_asr",
-                        segment_count=len(chunk.get("full_transcript", [])),
-                    )
-                elif chunk.get("type") == "error":
-                    record_app_event("transcription_stream_error", engine="vibevoice_asr", message=chunk.get("message"))
-                
-                yield f"data: {json.dumps(chunk)}\n\n"
-                
-                await asyncio.sleep(0.01)
-                
-        except Exception as err:
-            logger.error(f"Erro no streaming VibeVoice: {err}", exc_info=True)
-            record_exception_event("transcription_stream_exception", err, engine="vibevoice_asr")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(err)})}\n\n"
-        finally:
-            if os.path.exists(temp_file_path):
-                try:
-                    os.remove(temp_file_path)
-                    logger.info(f"Arquivo temporário VibeVoice removido: {temp_file_path}")
-                except Exception as cleanup_err:
-                    logger.warning(f"Não foi possível remover o arquivo temporário VibeVoice: {cleanup_err}")
+    def make_generator(cancel_event):
+        return transcribe_vibevoice_generator(
+            file_path=temp_file_path,
+            prompt=vibevoice_prompt,
+            diarization=vibevoice_diarization,
+            chunk_length_seconds=vibevoice_chunk_size,
+            temperature=vibevoice_temperature,
+            repetition_penalty=vibevoice_repetition_penalty,
+            top_p=vibevoice_top_p,
+            top_k=vibevoice_top_k,
+            num_beams=vibevoice_num_beams,
+            max_new_tokens=vibevoice_max_new_tokens,
+            cancel_event=cancel_event
+        )
 
-    return StreamingResponse(sse_generator_vibevoice(), media_type="text/event-stream")
+    return _transcription_sse_response(
+        request, job, make_generator,
+        engine="vibevoice_asr", model_label="vibevoice_asr", temp_file_path=temp_file_path,
+    )
 
 
 @app.websocket("/api/live-transcribe")
