@@ -21,6 +21,17 @@ def main_module():
     return main
 
 
+@pytest.fixture(autouse=True)
+def isolated_history(tmp_path, monkeypatch):
+    """Redireciona o histórico de jobs para um arquivo temporário, evitando
+    que os testes escrevam no data/history.jsonl real do projeto."""
+    from services.jobs import job_manager
+
+    history_path = tmp_path / "history.jsonl"
+    monkeypatch.setattr(job_manager, "_history_path", history_path)
+    return history_path
+
+
 @pytest.fixture()
 def client(main_module):
     from fastapi.testclient import TestClient

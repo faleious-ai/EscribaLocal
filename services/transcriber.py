@@ -233,12 +233,20 @@ def transcribe_audio_generator(
     vad_filter: bool = True,
     cpu_threads: int = 4,
     initial_prompt: str = None,
-    temperature: float = 0.0
+    temperature: float = 0.0,
+    cancel_event: threading.Event = None
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Transcreve um arquivo de áudio gerando atualizações em tempo real do progresso.
     Retorna um Generator que faz streaming do status.
+
+    O cancelamento é cooperativo: quando `cancel_event` é sinalizado, o gerador
+    emite um evento {"type": "cancelled"} e retorna no próximo ponto de checagem
+    (download, carga do modelo, decodificação ou entre segmentos).
     """
+    def _is_cancelled() -> bool:
+        return cancel_event is not None and cancel_event.is_set()
+
     try:
         cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "whisper-models")
         
@@ -294,6 +302,16 @@ def transcribe_audio_generator(
 
             # Loop de consumo da fila de progresso
             while dl_thread.is_alive() or not _download_queue.empty():
+                if _is_cancelled():
+                    # O snapshot_download não tem abort cooperativo; a thread
+                    # daemon termina o arquivo em andamento e o cache fica
+                    # aproveitável numa próxima execução.
+                    logger.info("Transcrição cancelada durante o download do modelo.")
+                    yield {
+                        "type": "cancelled",
+                        "message": "Tarefa cancelada. O download do modelo continua em segundo plano e ficará disponível no cache."
+                    }
+                    return
                 try:
                     event = _download_queue.get(timeout=0.2)
                     if event["type"] == "download_error":
@@ -303,8 +321,12 @@ def transcribe_audio_generator(
                     yield event
                 except queue.Empty:
                     continue
-            
+
             logger.info("Download do modelo concluído.")
+
+        if _is_cancelled():
+            yield {"type": "cancelled", "message": "Tarefa cancelada antes do carregamento do modelo."}
+            return
 
         yield {
             "type": "status",
@@ -326,7 +348,11 @@ def transcribe_audio_generator(
         }
         
         audio_data = decode_audio_ffmpeg(file_path)
-        
+
+        if _is_cancelled():
+            yield {"type": "cancelled", "message": "Tarefa cancelada antes da transcrição."}
+            return
+
         logger.info(f"Iniciando transcrição de {file_path} (Tamanho do array decodificado: {len(audio_data)})...")
         
         # O idioma nulo na biblioteca é interpretado como None (detecção automática)
@@ -357,8 +383,14 @@ def transcribe_audio_generator(
 
         transcribed_text_blocks = []
         
-        # Iterar sobre segmentos gera a transcrição real e nos dá o progresso dinâmico
+        # Iterar sobre segmentos gera a transcrição real e nos dá o progresso dinâmico.
+        # A decodificação do CT2 é lazy: abortar o loop interrompe o restante.
         for segment in segments:
+            if _is_cancelled():
+                logger.info("Transcrição cancelada pelo usuário durante a decodificação.")
+                yield {"type": "cancelled", "message": "Transcrição cancelada pelo usuário."}
+                return
+
             # Cálculo matemático de progresso baseado no timestamp de término do segmento
             progress = min(100.0, (segment.end / total_duration) * 100.0) if total_duration > 0 else 0.0
             

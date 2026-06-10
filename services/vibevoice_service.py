@@ -137,17 +137,29 @@ def transcribe_vibevoice_generator(
     top_p: float = 1.0,
     top_k: int = 50,
     num_beams: int = 1,
-    max_new_tokens: int = 2048
+    max_new_tokens: int = 2048,
+    cancel_event=None
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Transcreve um arquivo de áudio usando o fluxo oficial do VibeVoice ASR:
     pedido único, diarização/timestamps preservados e chunking interno do tokenizer.
+
+    `cancel_event` (threading.Event) habilita cancelamento cooperativo: como o
+    generate é uma chamada única e longa, o evento é checado a cada passo de
+    decodificação via StoppingCriteria; a saída parcial é descartada.
     """
     from services.transcriber import decode_audio_ffmpeg
+
+    def _is_cancelled() -> bool:
+        return cancel_event is not None and cancel_event.is_set()
 
     model, processor = None, None
     yield {"type": "status", "message": "Carregando ou baixando o modelo VibeVoice ASR... (Isso pode levar alguns minutos na primeira execução)"}
     model, processor = get_vibevoice_model_and_processor()
+
+    if _is_cancelled():
+        yield {"type": "cancelled", "message": "Tarefa cancelada após o carregamento do modelo."}
+        return
     target_device, target_dtype = _get_model_device_and_dtype(model)
     yield {
         "type": "model_status",
@@ -168,6 +180,10 @@ def transcribe_vibevoice_generator(
 
     yield {"type": "status", "message": "Decodificando áudio via FFmpeg..."}
     audio_data = decode_audio_ffmpeg(file_path, sampling_rate=sr)
+
+    if _is_cancelled():
+        yield {"type": "cancelled", "message": "Tarefa cancelada antes da transcrição."}
+        return
 
     duration = len(audio_data) / sr if sr else 0.0
     yield {"type": "meta", "language": "auto", "language_probability": 1.0, "duration": duration}
@@ -206,8 +222,22 @@ def transcribe_vibevoice_generator(
         if repetition_penalty != 1.0:
             generation_kwargs["repetition_penalty"] = repetition_penalty
 
+        if cancel_event is not None:
+            from transformers import StoppingCriteria, StoppingCriteriaList
+
+            class _CancelGeneration(StoppingCriteria):
+                def __call__(self, input_ids, scores, **kwargs) -> bool:
+                    return cancel_event.is_set()
+
+            generation_kwargs["stopping_criteria"] = StoppingCriteriaList([_CancelGeneration()])
+
         with torch.no_grad():
             output_ids = model.generate(**inputs, **generation_kwargs)
+
+        if _is_cancelled():
+            # Saída parcial de um generate interrompido é inconsistente; descarta.
+            yield {"type": "cancelled", "message": "Transcrição cancelada pelo usuário durante a geração."}
+            return
 
         input_ids_length = inputs["input_ids"].shape[1]
         generated_ids = output_ids[:, input_ids_length:]

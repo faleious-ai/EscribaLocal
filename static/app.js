@@ -6,6 +6,7 @@ const state = {
     timerInterval: null,
     transcriptionSegments: [],
     abortController: null,
+    currentJobId: null,
     showTimestamps: true,
     showSpeakers: true,
     
@@ -594,8 +595,18 @@ function setupActions() {
         });
     }
     
-    // Parar transcrição em execução
-    elements.btnStopTranscription.addEventListener("click", () => {
+    // Parar transcrição em execução: primeiro cancela o job no SERVIDOR
+    // (libera GPU/CPU), depois aborta o stream local.
+    elements.btnStopTranscription.addEventListener("click", async () => {
+        const jobId = state.currentJobId;
+        if (jobId) {
+            try {
+                await fetch(`/api/jobs/${jobId}/cancel`, { method: "POST" });
+                logClientEvent("transcription_cancel_requested", { details: { job_id: jobId } });
+            } catch (err) {
+                console.warn("Falha ao cancelar o job no servidor (o abort local continua):", err);
+            }
+        }
         if (state.abortController) {
             state.abortController.abort();
             state.abortController = null;
@@ -606,6 +617,7 @@ function setupActions() {
             elements.progressPercentage.textContent = "0%";
             showToast("Transcrição parada.", true);
         }
+        state.currentJobId = null;
     });
     
     // Lógica para pesquisar termos no texto transcrito
@@ -1053,6 +1065,7 @@ async function startTranscriptionWorkflow() {
     elements.progressPercentage.textContent = "0%";
     elements.transcriptSegmentsList.innerHTML = "";
     elements.dualWorkspace.style.display = "none";
+    state.currentJobId = null;
     setModelStatus(elements.asrModelStatus, "Solicitado", getSelectedAsrModelLabel(), false);
     logClientEvent("transcription_requested", {
         details: {
@@ -1151,7 +1164,20 @@ async function startTranscriptionWorkflow() {
 }
 
 function handleSSEPayload(data) {
-    if (data.type === "model_status") {
+    if (data.type === "job") {
+        // Identificador do job no servidor; usado pelo botão Parar para
+        // cancelar o processamento de verdade (não só o stream local).
+        state.currentJobId = data.job_id;
+    }
+    else if (data.type === "cancelled") {
+        stopTimer();
+        setUIBusy(false);
+        state.currentJobId = null;
+        elements.progressStatus.textContent = data.message || "Transcrição cancelada no servidor.";
+        logClientEvent("transcription_cancelled", { details: { message: data.message } });
+        showToast("Transcrição cancelada.", true);
+    }
+    else if (data.type === "model_status") {
         setModelStatus(
             elements.asrModelStatus,
             data.caption || (data.fallback ? "Fallback em uso" : "Modelo em uso"),
@@ -1207,6 +1233,7 @@ function handleSSEPayload(data) {
     else if (data.type === "done") {
         stopTimer();
         setUIBusy(false);
+        state.currentJobId = null;
         elements.progressStatus.textContent = "Transcrição concluída com sucesso!";
         elements.progressBarFill.style.width = "100%";
         elements.progressPercentage.textContent = "100%";
@@ -1229,6 +1256,7 @@ function handleSSEPayload(data) {
     else if (data.type === "error") {
         stopTimer();
         setUIBusy(false);
+        state.currentJobId = null;
         elements.progressStatus.textContent = `Erro: ${data.message}`;
         setModelStatus(elements.asrModelStatus, "Falha", data.message || "Erro no modelo", true);
         logClientEvent("transcription_stream_error", { severity: "error", message: data.message });
