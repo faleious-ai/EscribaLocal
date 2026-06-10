@@ -42,6 +42,7 @@ from services.vibevoice_tts_1_5b import SUPPORTED_LONGFORM_TTS_MODELS, generate_
 from services.vibevoice_realtime_0_5b import generate_voice_realtime_wav_with_metadata, generate_voice_stream_0_5b
 from services.jobs import JobState, job_manager
 from routers.jobs_routes import router as jobs_router
+from routers.models_routes import router as models_router
 
 logger = logging.getLogger("EscribaLocal.Main")
 
@@ -59,6 +60,7 @@ app.add_middleware(
 )
 
 app.include_router(jobs_router)
+app.include_router(models_router)
 
 
 @app.middleware("http")
