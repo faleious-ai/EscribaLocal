@@ -2,8 +2,9 @@ import sys
 import os
 import gc
 import torch
-if not hasattr(torch, "float8_e8m0fnu"):
-    setattr(torch, "float8_e8m0fnu", torch.float32)
+
+from services.runtime_patches import apply_runtime_patches
+apply_runtime_patches()
 
 from services.transformers_loader import use_custom_transformers
 

@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not gpu and not network'"
+markers = [
+    "gpu: testes que exigem GPU/modelos reais (rodar manualmente no hardware alvo)",
+    "network: testes que exigem acesso a rede (rodar manualmente)",
+]
