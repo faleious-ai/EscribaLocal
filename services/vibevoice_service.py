@@ -1,19 +1,10 @@
 import os
 import gc
 import torch
-if not hasattr(torch, "float8_e8m0fnu"):
-    setattr(torch, "float8_e8m0fnu", torch.float32)
 
+from services.runtime_patches import apply_runtime_patches
+apply_runtime_patches()
 
-try:
-    import bitsandbytes as bnb
-    original_new = bnb.nn.Params4bit.__new__
-    def patched_new(cls, *args, **kwargs):
-        kwargs.pop('_is_hf_initialized', None)
-        return original_new(cls, *args, **kwargs)
-    bnb.nn.Params4bit.__new__ = patched_new
-except Exception as e:
-    pass
 import logging
 from typing import Dict, Any, List, Generator
 

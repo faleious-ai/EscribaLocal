@@ -28,18 +28,8 @@ from services.app_logging import (
 configure_app_logging()
 
 import torch
-if not hasattr(torch, "float8_e8m0fnu"):
-    setattr(torch, "float8_e8m0fnu", torch.float32)
-
-try:
-    import bitsandbytes as bnb
-    original_new = bnb.nn.Params4bit.__new__
-    def patched_new(cls, *args, **kwargs):
-        kwargs.pop('_is_hf_initialized', None)
-        return original_new(cls, *args, **kwargs)
-    bnb.nn.Params4bit.__new__ = patched_new
-except Exception as e:
-    pass
+from services.runtime_patches import apply_runtime_patches
+apply_runtime_patches()
 
 from services.transcriber import (
     decode_audio_bytes_ffmpeg,
@@ -792,7 +782,14 @@ async def get_index():
 
 # Monta arquivos estáticos
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
-app.mount("/pwa", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "escriba-pwa-standalone")), name="pwa")
+
+# O PWA standalone é opcional; montar uma pasta inexistente derruba o servidor
+# na inicialização (RuntimeError do StaticFiles).
+_pwa_dir = os.path.join(os.path.dirname(__file__), "escriba-pwa-standalone")
+if os.path.isdir(_pwa_dir):
+    app.mount("/pwa", StaticFiles(directory=_pwa_dir), name="pwa")
+else:
+    logger.info("Pasta 'escriba-pwa-standalone' ausente; rota /pwa não montada.")
 
 if __name__ == "__main__":
     import uvicorn
