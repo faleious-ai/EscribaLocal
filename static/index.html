@@ -37,6 +37,7 @@
                     <span class="hw-value">Carregando...</span>
                     <div class="hw-bar"><div class="hw-bar-inner" style="width: 0%"></div></div>
                 </div>
+                <button id="btn-open-models-panel" class="btn-models-panel" title="Gerenciar modelos no disco e na memória">🧩 Modelos</button>
             </div>
         </header>
 
@@ -568,6 +569,24 @@ Voz 2: Sim, os modelos VibeVoice de TTS, Large e Realtime estão prontos.</texta
         </main>
     </div>
 
+    <!-- PAINEL DE MODELOS E MEMÓRIA -->
+    <div id="models-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content models-modal-content">
+            <div class="modal-header">
+                <h3>🧩 Modelos e Memória</h3>
+                <button type="button" id="models-modal-close" class="modal-close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="models-memory-section" style="display: none;">
+                    <h4 class="models-section-title">Na memória (VRAM/RAM)</h4>
+                    <div id="models-loaded-list" class="models-loaded-list"></div>
+                </div>
+                <h4 class="models-section-title">No disco</h4>
+                <div id="models-table-container"><p class="model-notes">Carregando catálogo...</p></div>
+            </div>
+        </div>
+    </div>
+
     <!-- MODAL DE EXPLICAÇÃO DETALHADA -->
     <div id="info-modal" class="modal-overlay" style="display: none;">
         <div class="modal-content">
@@ -585,5 +604,6 @@ Voz 2: Sim, os modelos VibeVoice de TTS, Large e Realtime estão prontos.</texta
     <div class="toast" id="toast-notification">Mensagem de aviso aqui</div>
 
     <script src="/static/app.js?v=3"></script>
+    <script src="/static/js/models_panel.js?v=1"></script>
 </body>
 </html>

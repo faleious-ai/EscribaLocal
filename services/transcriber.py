@@ -1,13 +1,10 @@
 import os
 import gc
 import logging
-import queue
 import threading
-import time
 import subprocess
 from typing import Dict, Any, Generator
 import torch
-import tqdm
 import numpy as np
 import imageio_ffmpeg
 
@@ -88,9 +85,6 @@ _current_model_name = None
 _current_device = None
 _current_compute_type = None
 
-# Fila para compartilhar eventos de download
-_download_queue = queue.Queue()
-
 
 def _whisper_status_payload(
     model_name: str,
@@ -132,42 +126,6 @@ def get_whisper_runtime_status(
         requested_device=requested_device,
         requested_compute_type=requested_compute_type,
     )
-
-# Salva as referências originais dos métodos da classe tqdm.tqdm
-_original_tqdm_update = tqdm.tqdm.update
-_original_tqdm_init = tqdm.tqdm.__init__
-
-def _patched_tqdm_init(self, *args, **kwargs):
-    # Força a flag disable para False para contornar ambientes não-TTY (como processos de segundo plano)
-    if "disable" in kwargs:
-        kwargs["disable"] = False
-    _original_tqdm_init(self, *args, **kwargs)
-    self.disable = False
-
-def _patched_tqdm_update(self, n=1):
-    res = _original_tqdm_update(self, n)
-    if self.total and self.total > 0:
-        percent = (self.n / self.total) * 100
-        elapsed = time.time() - self.start_t
-        speed_mb = (self.n / (1024 * 1024)) / elapsed if elapsed > 0 else 0.0
-        current_mb = self.n / (1024 * 1024)
-        total_mb = self.total / (1024 * 1024)
-        
-        _download_queue.put({
-            "type": "download_progress",
-            "percent": round(percent, 1),
-            "speed_mb": round(speed_mb, 2),
-            "current_mb": round(current_mb, 1),
-            "total_mb": round(total_mb, 1),
-            "filename": self.desc or "Modelo Whisper"
-        })
-    return res
-
-# Aplica os patches diretamente no objeto da classe global
-tqdm.tqdm.__init__ = _patched_tqdm_init
-tqdm.tqdm.update = _patched_tqdm_update
-
-
 
 def get_whisper_model(model_name: str, device: str, compute_type: str, cpu_threads: int = 4):
     """
@@ -248,81 +206,16 @@ def transcribe_audio_generator(
         return cancel_event is not None and cancel_event.is_set()
 
     try:
-        cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "whisper-models")
-        
-        # Procura de forma robusta se a pasta do modelo existe e possui o arquivo 'model.bin'
-        model_exists = False
-        if os.path.exists(cache_dir):
-            for folder in os.listdir(cache_dir):
-                # Aceita 'Systran' (large-v3, base, tiny) ou 'mobiuslabsgmbh' (large-v3-turbo)
-                if model_name in folder:
-                    folder_path = os.path.join(cache_dir, folder)
-                    if os.path.isdir(folder_path):
-                        for root, dirs, files in os.walk(folder_path):
-                            if "model.bin" in files:
-                                model_exists = True
-                                break
-        
-        if not model_exists:
-            # Remove travas (.lock) órfãs que impedem downloads após reloads do servidor
-            import shutil
-            locks_dir = os.path.join(cache_dir, ".locks")
-            if os.path.exists(locks_dir):
-                for folder in os.listdir(locks_dir):
-                    if model_name in folder:
-                        lock_folder_path = os.path.join(locks_dir, folder)
-                        try:
-                            shutil.rmtree(lock_folder_path)
-                            logger.info(f"Limpo arquivo de trava (.lock) orfao em: {lock_folder_path}")
-                        except Exception as lock_err:
-                            logger.warning(f"Erro ao limpar arquivos de trava: {lock_err}")
-        
-        if not model_exists:
-            # Esvazia a fila de eventos antes de começar
-            while not _download_queue.empty():
-                try:
-                    _download_queue.get_nowait()
-                except queue.Empty:
-                    break
+        # Garante o modelo no cache. O download (com limpeza de travas órfãs,
+        # espelhos e progresso) é responsabilidade do model_manager, que emite
+        # os mesmos eventos download_progress que o frontend sempre consumiu.
+        from services.model_manager import ensure_whisper_model_events
 
-            from faster_whisper.utils import download_model
-
-            def run_download_thread():
-                try:
-                    # O download agora usa a classe tqdm com o patch global de classe já aplicado
-                    download_model(model_name, cache_dir=cache_dir)
-                    _download_queue.put({"type": "download_done"})
-                except Exception as err:
-                    _download_queue.put({"type": "download_error", "message": str(err)})
-
-            logger.info(f"Disparando thread de download do modelo {model_name}...")
-            dl_thread = threading.Thread(target=run_download_thread)
-            dl_thread.daemon = True
-            dl_thread.start()
-
-            # Loop de consumo da fila de progresso
-            while dl_thread.is_alive() or not _download_queue.empty():
-                if _is_cancelled():
-                    # O snapshot_download não tem abort cooperativo; a thread
-                    # daemon termina o arquivo em andamento e o cache fica
-                    # aproveitável numa próxima execução.
-                    logger.info("Transcrição cancelada durante o download do modelo.")
-                    yield {
-                        "type": "cancelled",
-                        "message": "Tarefa cancelada. O download do modelo continua em segundo plano e ficará disponível no cache."
-                    }
-                    return
-                try:
-                    event = _download_queue.get(timeout=0.2)
-                    if event["type"] == "download_error":
-                        raise Exception(event["message"])
-                    elif event["type"] == "download_done":
-                        break
-                    yield event
-                except queue.Empty:
-                    continue
-
-            logger.info("Download do modelo concluído.")
+        for event in ensure_whisper_model_events(model_name, cancel_event=cancel_event):
+            yield event
+            if event.get("type") == "cancelled":
+                logger.info("Transcrição cancelada durante o download do modelo.")
+                return
 
         if _is_cancelled():
             yield {"type": "cancelled", "message": "Tarefa cancelada antes do carregamento do modelo."}
