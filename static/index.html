@@ -38,6 +38,7 @@
                     <div class="hw-bar"><div class="hw-bar-inner" style="width: 0%"></div></div>
                 </div>
                 <button id="btn-open-models-panel" class="btn-models-panel" title="Gerenciar modelos no disco e na memória">🧩 Modelos</button>
+                <button id="btn-open-logs-panel" class="btn-models-panel" title="Acompanhar os logs do servidor em tempo real">📜 Logs</button>
             </div>
         </header>
 
@@ -587,6 +588,37 @@ Voz 2: Sim, os modelos VibeVoice de TTS, Large e Realtime estão prontos.</texta
         </div>
     </div>
 
+    <!-- PAINEL DE LOGS EM TEMPO REAL -->
+    <div id="logs-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content models-modal-content">
+            <div class="modal-header">
+                <h3>📜 Logs do Servidor</h3>
+                <button type="button" id="logs-modal-close" class="modal-close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="logs-toolbar">
+                    <select id="logs-kind" class="logs-control">
+                        <option value="events">Eventos (estruturado)</option>
+                        <option value="app">Log da aplicação</option>
+                    </select>
+                    <select id="logs-level" class="logs-control">
+                        <option value="">Todos os níveis</option>
+                        <option value="INFO">INFO</option>
+                        <option value="WARNING">WARNING</option>
+                        <option value="ERROR">ERROR</option>
+                        <option value="CRITICAL">CRITICAL</option>
+                    </select>
+                    <input type="text" id="logs-filter" class="logs-control" placeholder="Filtrar texto..." />
+                    <button type="button" id="logs-pause" class="model-btn">⏸ Pausar</button>
+                    <button type="button" id="logs-clear" class="model-btn">🧹 Limpar</button>
+                    <label class="logs-autoscroll"><input type="checkbox" id="logs-autoscroll" checked /> rolagem automática</label>
+                </div>
+                <div id="logs-lines" class="logs-lines"></div>
+                <p id="logs-status" class="model-notes">Desconectado</p>
+            </div>
+        </div>
+    </div>
+
     <!-- MODAL DE EXPLICAÇÃO DETALHADA -->
     <div id="info-modal" class="modal-overlay" style="display: none;">
         <div class="modal-content">
@@ -605,5 +637,6 @@ Voz 2: Sim, os modelos VibeVoice de TTS, Large e Realtime estão prontos.</texta
 
     <script src="/static/app.js?v=3"></script>
     <script src="/static/js/models_panel.js?v=1"></script>
+    <script src="/static/js/logs_panel.js?v=1"></script>
 </body>
 </html>
