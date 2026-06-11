@@ -1291,3 +1291,68 @@ body {
     color: var(--text-secondary);
     font-size: 0.85rem;
 }
+
+/* ===== PAINEL DE LOGS ===== */
+.logs-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.logs-control {
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+}
+
+.logs-control:focus {
+    outline: none;
+    border-color: var(--accent-cyan);
+}
+
+#logs-filter {
+    flex: 1;
+    min-width: 140px;
+}
+
+.logs-autoscroll {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.logs-lines {
+    height: 420px;
+    overflow-y: auto;
+    background: var(--bg-main);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 8px;
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 0.72rem;
+    line-height: 1.5;
+}
+
+.log-line {
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-all;
+    border-bottom: 1px dotted hsla(222, 15%, 25%, 0.25);
+    padding: 1px 0;
+}
+
+.log-line.log-warning {
+    color: var(--accent-warning);
+}
+
+.log-line.log-error,
+.log-line.log-critical {
+    color: var(--accent-danger);
+}
