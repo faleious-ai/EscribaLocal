@@ -115,45 +115,13 @@ UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "temp_uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(os.path.join(os.path.dirname(__file__), "static"), exist_ok=True)
 
-def get_gpu_vram_real():
-    """
-    Retorna (memoria_usada_mb, memoria_total_mb) da GPU NVIDIA via nvidia-smi.
-    Retorna None se falhar.
-    """
-    import subprocess
-    import shutil
-    
-    # Caminhos comuns e comando
-    cmd = "nvidia-smi"
-    nvsmi_path = r"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
-    if not shutil.which(cmd) and os.path.exists(nvsmi_path):
-        cmd = nvsmi_path
-        
-    try:
-        # startupinfo evita que uma janela preta do cmd pisque no Windows
-        startupinfo = None
-        if os.name == 'nt':
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_HIDE
-            
-        output = subprocess.check_output(
-            [cmd, "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"],
-            startupinfo=startupinfo,
-            text=True
-        )
-        parts = output.strip().split(",")
-        if len(parts) == 2:
-            return float(parts[0].strip()), float(parts[1].strip())
-    except Exception:
-        pass
-    return None
-
 @app.get("/api/system-status")
 async def get_system_status():
     """
     Retorna o status atual de uso do Processador, Memória RAM e GPU NVIDIA (se disponível).
     """
+    from services.hardware import get_gpu_status
+
     status = {
         "cpu": {
             "percent": psutil.cpu_percent(interval=None),
@@ -165,47 +133,8 @@ async def get_system_status():
             "used_percent": psutil.virtual_memory().percent,
             "free_gb": round(psutil.virtual_memory().available / (1024 ** 3), 1),
         },
-        "gpu": {
-            "available": False,
-            "name": "Nenhuma GPU detectada",
-            "vram_total_mb": 0,
-            "vram_allocated_mb": 0,
-            "vram_cached_mb": 0
-        }
+        "gpu": get_gpu_status(),
     }
-
-    if torch.cuda.is_available():
-        try:
-            device_id = torch.cuda.current_device()
-            gpu_name = torch.cuda.get_device_name(device_id)
-            
-            # Tenta ler a VRAM real via nvidia-smi para mostrar o uso do sistema (ctranslate2 bypasses pytorch)
-            real_vram = get_gpu_vram_real()
-            if real_vram:
-                used_mb, total_mb = real_vram
-                status["gpu"] = {
-                    "available": True,
-                    "name": gpu_name,
-                    "vram_allocated_mb": round(used_mb, 1),
-                    "vram_cached_mb": 0.0,
-                    "vram_total_mb": round(total_mb, 1)
-                }
-            else:
-                # Fallback para PyTorch VRAM info
-                allocated = torch.cuda.memory_allocated(device_id) / (1024 ** 2)
-                cached = torch.cuda.memory_reserved(device_id) / (1024 ** 2)
-                
-                status["gpu"] = {
-                    "available": True,
-                    "name": gpu_name,
-                    "vram_allocated_mb": round(allocated, 1),
-                    "vram_cached_mb": round(cached, 1),
-                    "vram_total_mb": round(torch.cuda.get_device_properties(device_id).total_memory / (1024 ** 2), 1)
-                }
-        except Exception as e:
-            logger.warning(f"Erro ao ler informações detalhadas da GPU: {e}")
-            status["gpu"]["available"] = True
-            status["gpu"]["name"] = "NVIDIA GPU (CUDA Ativo)"
 
     global _last_system_status_log_at
     now = time.monotonic()
