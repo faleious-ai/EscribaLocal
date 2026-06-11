@@ -46,6 +46,7 @@ from routers.jobs_routes import router as jobs_router
 from routers.models_routes import router as models_router
 from routers.config_routes import router as config_router
 from routers.parameters_routes import router as parameters_router
+from routers.environment_routes import router as environment_router
 
 logger = logging.getLogger("EscribaLocal.Main")
 
@@ -66,6 +67,7 @@ app.include_router(jobs_router)
 app.include_router(models_router)
 app.include_router(config_router)
 app.include_router(parameters_router)
+app.include_router(environment_router)
 
 
 @app.middleware("http")
