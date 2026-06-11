@@ -57,6 +57,9 @@
                     <span class="badge badge-hardware" id="recommendation-badge">RTX 3050 Ativa</span>
                 </div>
                 <div class="panel-body">
+                    <!-- PRESETS, PERFIS E MODO AVANÇADO (renderizado por presets_profiles.js) -->
+                    <div id="presets-profiles-container"></div>
+
                     <!-- ASR CONFIGS CONTAINER -->
                     <div id="asr-configs-sidebar">
                         <!-- ENGINE SELECT -->
@@ -619,6 +622,25 @@ Voz 2: Sim, os modelos VibeVoice de TTS, Large e Realtime estão prontos.</texta
         </div>
     </div>
 
+    <!-- MODO AVANÇADO: TODOS OS PARÂMETROS -->
+    <div id="advanced-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content models-modal-content">
+            <div class="modal-header">
+                <h3>🧪 Modo Avançado — todos os parâmetros</h3>
+                <button type="button" id="advanced-modal-close" class="modal-close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="model-notes">Cada parâmetro mostra descrição, faixa permitida, impacto e riscos.
+                   Os valores são validados no servidor (fora da faixa = ajustado ao limite).</p>
+                <div id="advanced-params-body"></div>
+                <div class="adv-actions">
+                    <button type="button" id="advanced-reset" class="model-btn">↩ Restaurar padrões</button>
+                    <button type="button" id="advanced-apply" class="model-btn model-btn-primary">✔ Aplicar ao formulário</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- MODAL DE EXPLICAÇÃO DETALHADA -->
     <div id="info-modal" class="modal-overlay" style="display: none;">
         <div class="modal-content">
@@ -635,8 +657,10 @@ Voz 2: Sim, os modelos VibeVoice de TTS, Large e Realtime estão prontos.</texta
     <!-- NOTIFICAÇÃO FLUTUANTE -->
     <div class="toast" id="toast-notification">Mensagem de aviso aqui</div>
 
-    <script src="/static/app.js?v=3"></script>
+    <script src="/static/app.js?v=4"></script>
     <script src="/static/js/models_panel.js?v=1"></script>
     <script src="/static/js/logs_panel.js?v=1"></script>
+    <script src="/static/js/presets_profiles.js?v=1"></script>
+    <script src="/static/js/advanced_params.js?v=1"></script>
 </body>
 </html>
