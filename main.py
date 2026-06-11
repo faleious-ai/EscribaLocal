@@ -43,6 +43,7 @@ from services.vibevoice_realtime_0_5b import generate_voice_realtime_wav_with_me
 from services.jobs import JobState, job_manager
 from routers.jobs_routes import router as jobs_router
 from routers.models_routes import router as models_router
+from routers.config_routes import router as config_router
 
 logger = logging.getLogger("EscribaLocal.Main")
 
@@ -61,6 +62,7 @@ app.add_middleware(
 
 app.include_router(jobs_router)
 app.include_router(models_router)
+app.include_router(config_router)
 
 
 @app.middleware("http")
@@ -109,6 +111,9 @@ async def request_logging_middleware(request: Request, call_next):
 @app.on_event("startup")
 async def log_app_startup():
     record_app_event("app_startup", **get_log_paths())
+    # Carrega settings persistidos e aplica efeitos (ex.: política de VRAM)
+    from services.config_store import apply_settings_on_startup
+    apply_settings_on_startup()
 
 # Cria a pasta de arquivos estáticos e uploads temporários
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "temp_uploads")
