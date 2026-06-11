@@ -1356,3 +1356,88 @@ body {
 .log-line.log-critical {
     color: var(--accent-danger);
 }
+
+/* ===== PRESETS, PERFIS E MODO AVANÇADO ===== */
+.pp-block {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 12px;
+}
+
+.pp-label {
+    display: block;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+.pp-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.pp-advanced-btn {
+    width: 100%;
+    margin-bottom: 14px;
+}
+
+.adv-engine {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    margin-bottom: 10px;
+    padding: 6px 10px;
+}
+
+.adv-engine summary {
+    cursor: pointer;
+    color: var(--text-primary);
+    font-weight: 600;
+    padding: 4px 0;
+}
+
+.adv-engine-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 10px;
+    padding: 8px 0;
+}
+
+.adv-param {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 8px;
+}
+
+.adv-param-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    margin-bottom: 6px;
+}
+
+.adv-param-control {
+    margin-bottom: 4px;
+}
+
+.adv-number {
+    width: 110px;
+}
+
+.adv-risks {
+    color: var(--accent-warning);
+    font-size: 0.72rem;
+    margin-top: 4px;
+}
+
+.adv-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 12px;
+}

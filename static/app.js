@@ -469,6 +469,80 @@ function setupConfigEventListeners() {
     });
 }
 
+// --- APLICAÇÃO/COLETA DE PARÂMETROS (presets, perfis e modo avançado) ---
+// Mapeia nome de campo da API -> elemento do formulário + evento que os
+// listeners existentes escutam (disparar o evento atualiza spans e storage).
+const FORM_FIELD_MAP = {
+    whisper: {
+        model: { key: "inputModel", event: "change" },
+        device: { key: "inputDevice", event: "change" },
+        compute_type: { key: "inputCompute", event: "change" },
+        beam_size: { key: "inputBeam", event: "input" },
+        language: { key: "whisperLanguage", event: "change" },
+        vad_filter: { key: "inputVad", event: "change", checkbox: true },
+        cpu_threads: { key: "inputThreads", event: "input" },
+        whisper_prompt: { key: "whisperPrompt", event: "input" },
+        whisper_temperature: { key: "whisperTemperature", event: "input" },
+    },
+    vibevoice_asr: {
+        vibevoice_prompt: { key: "vibevoicePrompt", event: "input" },
+        vibevoice_diarization: { key: "vibevoiceDiarization", event: "change", checkbox: true },
+        vibevoice_chunk_size: { key: "vibevoiceChunkSize", event: "input" },
+        vibevoice_temperature: { key: "vibevoiceTemperature", event: "input" },
+        vibevoice_repetition_penalty: { key: "vibevoiceRepetitionPenalty", event: "input" },
+        vibevoice_top_p: { key: "vibevoiceTopP", event: "input" },
+        vibevoice_top_k: { key: "vibevoiceTopK", event: "input" },
+        vibevoice_num_beams: { key: "vibevoiceNumBeams", event: "input" },
+        vibevoice_max_new_tokens: { key: "vibevoiceMaxNewTokens", event: "input" },
+    },
+    tts: {
+        tts_model: { key: "inputTtsModel", event: "change" },
+        speaker_id: { key: "inputTtsSpeaker", event: "change" },
+        temperature: { key: "inputTtsTemp", event: "input" },
+        speed: { key: "inputTtsSpeed", event: "input" },
+        repetition_penalty: { key: "inputTtsRepPenalty", event: "input" },
+        // top_p/top_k do TTS existem na API, mas não têm controle nesta UI.
+    },
+};
+
+function applyParamsToForm(engineParams) {
+    let applied = 0;
+    for (const [engine, fields] of Object.entries(engineParams || {})) {
+        const fieldMap = FORM_FIELD_MAP[engine];
+        if (!fieldMap) continue;
+        for (const [fieldName, value] of Object.entries(fields || {})) {
+            const spec = fieldMap[fieldName];
+            if (!spec || value === null || value === undefined) continue;
+            const el = elements[spec.key];
+            if (!el) continue;
+            if (spec.checkbox) el.checked = Boolean(value);
+            else el.value = value;
+            el.dispatchEvent(new Event(spec.event, { bubbles: true }));
+            applied++;
+        }
+    }
+    saveSettingsToStorage();
+    return applied;
+}
+
+function collectParamsFromForm() {
+    const collected = {};
+    for (const [engine, fieldMap] of Object.entries(FORM_FIELD_MAP)) {
+        collected[engine] = {};
+        for (const [fieldName, spec] of Object.entries(fieldMap)) {
+            if (fieldName.includes("prompt")) continue; // conteúdo do usuário fica fora de presets/perfis
+            const el = elements[spec.key];
+            if (!el) continue;
+            collected[engine][fieldName] = spec.checkbox ? el.checked : el.value;
+        }
+    }
+    return collected;
+}
+
+// Expostos para os módulos de presets/perfis e modo avançado.
+window.applyParamsToForm = applyParamsToForm;
+window.collectParamsFromForm = collectParamsFromForm;
+
 // --- MONITORAMENTO DE HARDWARE ---
 async function fetchSystemStatus() {
     try {
