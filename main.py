@@ -41,9 +41,11 @@ from services.vibevoice_service import transcribe_vibevoice_generator
 from services.vibevoice_tts_1_5b import SUPPORTED_LONGFORM_TTS_MODELS, generate_voice_1_5b_with_metadata
 from services.vibevoice_realtime_0_5b import generate_voice_realtime_wav_with_metadata, generate_voice_stream_0_5b
 from services.jobs import JobState, job_manager
+from services.parameters_registry import validate_params
 from routers.jobs_routes import router as jobs_router
 from routers.models_routes import router as models_router
 from routers.config_routes import router as config_router
+from routers.parameters_routes import router as parameters_router
 
 logger = logging.getLogger("EscribaLocal.Main")
 
@@ -63,6 +65,7 @@ app.add_middleware(
 app.include_router(jobs_router)
 app.include_router(models_router)
 app.include_router(config_router)
+app.include_router(parameters_router)
 
 
 @app.middleware("http")
@@ -332,6 +335,22 @@ async def transcribe_audio(
     Endpoint que recebe o áudio, salva temporariamente e faz streaming
     dos dados de progresso e transcrição em tempo real do Whisper via Server-Sent Events (SSE).
     """
+    # Validação clamp+warn: valores fora de faixa são ajustados (nunca
+    # rejeitados, para manter compatibilidade com clientes antigos).
+    validation = validate_params("whisper", {
+        "model": model, "device": device, "compute_type": compute_type,
+        "beam_size": beam_size, "language": language, "vad_filter": vad_filter,
+        "cpu_threads": cpu_threads, "whisper_prompt": whisper_prompt,
+        "whisper_temperature": whisper_temperature,
+    })
+    if validation["issues"]:
+        record_app_event("parameter_validation_issues", engine="whisper", issues=validation["issues"])
+    _norm = validation["normalized"]
+    model, device, compute_type = _norm["model"], _norm["device"], _norm["compute_type"]
+    beam_size, language, vad_filter = _norm["beam_size"], _norm["language"], _norm["vad_filter"]
+    cpu_threads, whisper_prompt = _norm["cpu_threads"], _norm["whisper_prompt"]
+    whisper_temperature = _norm["whisper_temperature"]
+
     file_id = str(uuid.uuid4())
     ext = os.path.splitext(file.filename)[1] or ".mp3"
     temp_file_path = os.path.join(UPLOAD_DIR, f"{file_id}{ext}")
@@ -418,6 +437,26 @@ async def transcribe_vibevoice(
     Endpoint dedicado que recebe o áudio, salva temporariamente e faz streaming
     dos dados de progresso e transcrição em tempo real do VibeVoice via Server-Sent Events (SSE).
     """
+    validation = validate_params("vibevoice_asr", {
+        "vibevoice_prompt": vibevoice_prompt,
+        "vibevoice_diarization": vibevoice_diarization,
+        "vibevoice_chunk_size": vibevoice_chunk_size,
+        "vibevoice_temperature": vibevoice_temperature,
+        "vibevoice_repetition_penalty": vibevoice_repetition_penalty,
+        "vibevoice_top_p": vibevoice_top_p,
+        "vibevoice_top_k": vibevoice_top_k,
+        "vibevoice_num_beams": vibevoice_num_beams,
+        "vibevoice_max_new_tokens": vibevoice_max_new_tokens,
+    })
+    if validation["issues"]:
+        record_app_event("parameter_validation_issues", engine="vibevoice_asr", issues=validation["issues"])
+    _norm = validation["normalized"]
+    vibevoice_prompt, vibevoice_diarization = _norm["vibevoice_prompt"], _norm["vibevoice_diarization"]
+    vibevoice_chunk_size, vibevoice_temperature = _norm["vibevoice_chunk_size"], _norm["vibevoice_temperature"]
+    vibevoice_repetition_penalty, vibevoice_top_p = _norm["vibevoice_repetition_penalty"], _norm["vibevoice_top_p"]
+    vibevoice_top_k, vibevoice_num_beams = _norm["vibevoice_top_k"], _norm["vibevoice_num_beams"]
+    vibevoice_max_new_tokens = _norm["vibevoice_max_new_tokens"]
+
     file_id = str(uuid.uuid4())
     ext = os.path.splitext(file.filename)[1] or ".mp3"
     temp_file_path = os.path.join(UPLOAD_DIR, f"{file_id}{ext}")
