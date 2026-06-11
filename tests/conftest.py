@@ -32,6 +32,23 @@ def isolated_history(tmp_path, monkeypatch):
     return history_path
 
 
+@pytest.fixture(autouse=True)
+def isolated_config(tmp_path, monkeypatch):
+    """Redireciona settings/perfis para pastas temporárias e restaura a
+    política de VRAM do árbitro após cada teste."""
+    from services import config_store
+    from services.resource_arbiter import arbiter
+
+    config_dir = tmp_path / "config"
+    monkeypatch.setattr(config_store, "CONFIG_DIR", config_dir)
+    monkeypatch.setattr(config_store, "SETTINGS_PATH", config_dir / "settings.json")
+    monkeypatch.setattr(config_store, "PROFILES_DIR", config_dir / "profiles")
+    monkeypatch.setattr(config_store, "_settings_cache", {"settings": None, "mtime": None})
+    yield config_dir
+    if arbiter.policy != "exclusive":
+        arbiter.set_policy("exclusive")
+
+
 @pytest.fixture()
 def client(main_module):
     from fastapi.testclient import TestClient
