@@ -1441,3 +1441,34 @@ body {
     gap: 8px;
     margin-top: 12px;
 }
+
+/* ===== SETUP WIZARD & HISTÓRICO ===== */
+.wizard-step-body h2 {
+    font-family: 'Outfit', sans-serif;
+    color: var(--text-primary);
+    margin-bottom: 15px;
+    font-size: 1.4rem;
+}
+
+.wizard-step-body p {
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-bottom: 12px;
+}
+
+.job-error-detail {
+    font-size: 11px;
+    font-family: monospace;
+    color: var(--accent-danger);
+    background: rgba(240, 50, 50, 0.05);
+    border: 1px solid rgba(240, 50, 50, 0.15);
+    padding: 4px 8px;
+    border-radius: 4px;
+    margin-top: 6px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 80px;
+    overflow-y: auto;
+}
+

@@ -49,6 +49,16 @@ def isolated_config(tmp_path, monkeypatch):
         arbiter.set_policy("exclusive")
 
 
+@pytest.fixture(autouse=True)
+def isolated_retention(tmp_path, monkeypatch):
+    """Redireciona a pasta de uploads retidos para um diretório temporário isolado por teste."""
+    from services import input_retention
+    retained_dir = tmp_path / "temp_uploads" / "retained"
+    monkeypatch.setattr(input_retention, "RETAINED_DIR", retained_dir)
+    monkeypatch.setattr(input_retention, "UPLOAD_DIR", tmp_path / "temp_uploads")
+    return retained_dir
+
+
 @pytest.fixture()
 def client(main_module):
     from fastapi.testclient import TestClient

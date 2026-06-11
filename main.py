@@ -49,6 +49,7 @@ from routers.parameters_routes import router as parameters_router
 from routers.environment_routes import router as environment_router
 from routers.logs_routes import router as logs_router
 from routers.presets_routes import router as presets_router
+from routers.setup_routes import router as setup_router
 
 logger = logging.getLogger("EscribaLocal.Main")
 
@@ -72,6 +73,7 @@ app.include_router(parameters_router)
 app.include_router(environment_router)
 app.include_router(logs_router)
 app.include_router(presets_router)
+app.include_router(setup_router)
 
 
 @app.middleware("http")
@@ -308,8 +310,15 @@ def _transcription_sse_response(request: Request, job, make_generator, engine: s
                 # a parada do worker e registra como cancelado.
                 job.cancel_event.set()
                 final_state = JobState.CANCELLED
+            
+            # Executa retenção do arquivo físico (antes de persistir o final_state para atualizar input_ref)
+            from services.input_retention import retain_input_file
+            retained_path = retain_input_file(job.job_id, temp_file_path)
+            if retained_path:
+                job.input_ref = retained_path
+
             job_manager.finish(job.job_id, final_state, error=error_message)
-            if os.path.exists(temp_file_path):
+            if temp_file_path and os.path.isfile(temp_file_path):
                 try:
                     os.remove(temp_file_path)
                     logger.info(f"Arquivo temporário removido: {temp_file_path}")
