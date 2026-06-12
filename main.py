@@ -737,10 +737,18 @@ async def tts_generate(
                 speed=speed
             )
         )
+        def _header_safe(value) -> str:
+            # Headers HTTP precisam ser ASCII na prática: um travessão (U+2014)
+            # derrubava o endpoint com 500, e bytes latin-1 (ex.: 'ó') quebram
+            # clientes que decodificam headers como UTF-8.
+            import unicodedata
+            text = unicodedata.normalize("NFKD", str(value))
+            return text.encode("ascii", "ignore").decode("ascii") or "?"
+
         headers = {
-            "X-Escriba-TTS-Requested": tts_model,
-            "X-Escriba-TTS-Engine-Key": str(voice_result.get("engine_key", tts_model)),
-            "X-Escriba-TTS-Engine": str(voice_result.get("engine_label", tts_model)),
+            "X-Escriba-TTS-Requested": _header_safe(tts_model),
+            "X-Escriba-TTS-Engine-Key": _header_safe(voice_result.get("engine_key", tts_model)),
+            "X-Escriba-TTS-Engine": _header_safe(voice_result.get("engine_label", tts_model)),
             "X-Escriba-TTS-Fallback": "true" if voice_result.get("fallback") else "false",
         }
         record_app_event(

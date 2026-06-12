@@ -56,3 +56,27 @@ def test_frames_cap_bounds():
     assert _frames_cap_for("oi") == 120                      # mínimo
     assert _frames_cap_for(" ".join(["palavra"] * 10)) == 240  # 10*18+60
     assert _frames_cap_for(" ".join(["palavra"] * 10_000)) == 4000  # teto
+
+
+def test_tts_endpoint_tolerates_unicode_engine_label(client, main_module, monkeypatch):
+    """Regressão: rótulo de engine com travessão (U+2014) derrubava o
+    /api/tts/generate com 500 ('latin-1' codec can't encode) ao montar os
+    headers HTTP da resposta."""
+    def fake_generate(**kwargs):
+        return {
+            "wav_bytes": b"RIFF0000WAVEfake",
+            "engine_key": "tts_1_5b",
+            "engine_label": "VibeVoice — voz nativa (rótulo unicode)",
+            "fallback": False,
+        }
+
+    monkeypatch.setattr(main_module, "generate_voice_1_5b_with_metadata", fake_generate)
+
+    response = client.post(
+        "/api/tts/generate",
+        data={"text": "Olá, mundo.", "tts_model": "tts_1_5b", "speaker_id": "speaker_1"},
+    )
+    assert response.status_code == 200
+    assert response.content == b"RIFF0000WAVEfake"
+    assert "voz nativa" in response.headers["x-escriba-tts-engine"]
+    assert response.headers["x-escriba-tts-fallback"] == "false"
