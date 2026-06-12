@@ -124,7 +124,9 @@ MODEL_CATALOG: List[ModelSpec] = [
         repo_id="microsoft/VibeVoice-1.5B", display_name="VibeVoice TTS 1.5B",
         approx_download_mb=5408, cache_kind="hf_cache",
         approx_vram_mb={"bfloat16": 5400},
-        notes="Em bfloat16 ocupa ~5.4GB — usa quase toda a VRAM de 6GB; exige descarregar tudo antes.",
+        notes="Após baixar, requer conversão única de formato "
+              "(python scripts/convert_vibevoice_1_5b.py) — o fork local não lê o formato original. "
+              "Em 6GB de VRAM o app tenta GPU e cai para CPU (lento, mas voz real).",
     ),
     ModelSpec(
         id="vibevoice-tts-large", engine="tts_large",
@@ -141,7 +143,9 @@ MODEL_CATALOG: List[ModelSpec] = [
         repo_id="microsoft/VibeVoice-Realtime-0.5B", display_name="VibeVoice Realtime 0.5B",
         approx_download_mb=2035, cache_kind="hf_cache",
         approx_vram_mb={"bfloat16": 1500},
-        notes="TTS de baixa latência para o chat em tempo real.",
+        notes="LIMITAÇÃO ATUAL: o checkpoint usa o model_type 'vibevoice_streaming', que nem o fork local "
+              "nem o transformers 5.10.2 conhecem — a geração cai no fallback SAPI5 (voz do Windows). "
+              "Suporte real exige atualizar o transformers (decisão explícita no painel de ambiente).",
     ),
 ]
 

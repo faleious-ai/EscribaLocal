@@ -14,12 +14,11 @@ import torch
 from services.runtime_patches import apply_runtime_patches
 apply_runtime_patches()
 
-from services.transformers_loader import use_custom_transformers
+from services.transformers_loader import apply_vibevoice_fork_patches, use_custom_transformers
 
 with use_custom_transformers():
     from transformers import pipeline, AutoConfig, AutoModelForTextToWaveform
-    from transformers.models.vibevoice_acoustic_tokenizer.configuration_vibevoice_acoustic_tokenizer import VibeVoiceAcousticTokenizerConfig
-    VibeVoiceAcousticTokenizerConfig.decoder_depths = VibeVoiceAcousticTokenizerConfig.decoder_depths.setter(lambda self, val: None)
+    apply_vibevoice_fork_patches()
 
 
 
@@ -36,12 +35,38 @@ TTS_MODEL_DISPLAY_NAMES = {
 }
 SUPPORTED_LONGFORM_TTS_MODELS = set(TTS_MODEL_IDS)
 
+# O checkpoint oficial está no formato ORIGINAL do VibeVoice; o fork em
+# custom_transformers só carrega o formato CONVERTIDO (pesos renomeados +
+# config reestruturado). A conversão é local e única por máquina
+# (scripts/convert_vibevoice_1_5b.py); sem ela, tokenizers de áudio e
+# diffusion head ficam com pesos aleatórios e o TTS cai no SAPI5.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CONVERTED_MODEL_DIRS = {
+    "tts_1_5b": os.path.join(_PROJECT_ROOT, "models", "VibeVoice-1.5B-hf"),
+}
+
 _pipeline_model_keys = {"tts_1_5b"}
 _direct_model_keys = {"tts_large"}
 
 _tts_pipelines: Dict[str, Any] = {}
+_pipeline_devices: Dict[str, str] = {}
 _direct_processors: Dict[str, Any] = {}
 _direct_models: Dict[str, Any] = {}
+
+
+def _resolve_tts_source(model_key: str) -> str:
+    """Pasta convertida local quando existe; senão o repo (que falhará com
+    aviso claro no log, caindo no fallback SAPI5)."""
+    converted_dir = CONVERTED_MODEL_DIRS.get(model_key)
+    if converted_dir and os.path.isdir(converted_dir):
+        return converted_dir
+    if converted_dir:
+        logger.warning(
+            "Checkpoint convertido ausente em %s — o fork não carrega o formato "
+            "original do HuggingFace. Rode: python scripts/convert_vibevoice_1_5b.py",
+            converted_dir,
+        )
+    return TTS_MODEL_IDS[model_key]
 
 _voice_line_pattern = re.compile(r"^(?:voz|voice|speaker)\s*([0-9]+)\s*:\s*(.*)$", re.IGNORECASE)
 _speaker_pattern = re.compile(r"^Speaker\s+([0-9]+):", re.IGNORECASE)
@@ -67,31 +92,41 @@ def _get_transformers_pipeline(model_key: str):
     if model_key in _tts_pipelines:
         return _tts_pipelines[model_key]
 
-    model_id = TTS_MODEL_IDS[model_key]
-    try:
-        if torch.cuda.is_available():
-            from services.resource_arbiter import arbiter
-            arbiter.prepare_load(model_key)
-        with use_custom_transformers():
-            from transformers import pipeline
+    model_id = _resolve_tts_source(model_key)
+    attempts = []
+    if torch.cuda.is_available():
+        attempts.append(("cuda", {"device": 0, "torch_dtype": torch.bfloat16}))
+    # CPU é fallback real: lento, mas é a voz verdadeira do VibeVoice — melhor
+    # que cair no SAPI5 quando os 6GB de VRAM não comportam os pesos.
+    # Exceção: o Large (18.7GB) não cabe nem na RAM com folga; não tentar.
+    if model_key != "tts_large":
+        attempts.append(("cpu", {"device": -1, "torch_dtype": torch.bfloat16}))
 
-            device = 0 if torch.cuda.is_available() else -1
-            pipeline_kwargs = {
-                "task": "text-to-speech",
-                "model": model_id,
-                "device": device,
-                "trust_remote_code": True,
-            }
-            if torch.cuda.is_available():
-                pipeline_kwargs["torch_dtype"] = torch.bfloat16
+    for device_label, extra_kwargs in attempts:
+        try:
+            if device_label == "cuda":
+                from services.resource_arbiter import arbiter
+                arbiter.prepare_load(model_key)
+            with use_custom_transformers():
+                from transformers import pipeline
 
-            logger.info("Carregando pipeline VibeVoice TTS (%s)...", model_id)
-            _tts_pipelines[model_key] = pipeline(**pipeline_kwargs)
-            logger.info("Pipeline VibeVoice TTS carregada: %s", model_id)
-            return _tts_pipelines[model_key]
-    except Exception as exc:
-        logger.warning("Nao foi possivel carregar a pipeline %s: %s", model_id, exc)
-        return None
+                logger.info("Carregando pipeline VibeVoice TTS (%s) em %s...", model_id, device_label)
+                tts_pipeline = pipeline(
+                    task="text-to-speech",
+                    model=model_id,
+                    trust_remote_code=True,
+                    **extra_kwargs,
+                )
+            _tts_pipelines[model_key] = tts_pipeline
+            _pipeline_devices[model_key] = device_label
+            logger.info("Pipeline VibeVoice TTS carregada: %s (%s)", model_id, device_label)
+            return tts_pipeline
+        except Exception as exc:
+            logger.warning(
+                "Nao foi possivel carregar a pipeline %s em %s: %s",
+                model_id, device_label, str(exc)[:400],
+            )
+    return None
 
 
 def _get_direct_vibevoice_model(model_key: str):
@@ -370,10 +405,14 @@ def _run_transformers_pipeline(
         if audio_array is None:
             raise RuntimeError("A pipeline TTS nao retornou audio.")
         sample_rate = output.get("sampling_rate") or output.get("sample_rate") or 24000
+        device_label = _pipeline_devices.get(model_key, "cuda")
+        engine_label = TTS_MODEL_DISPLAY_NAMES[model_key]
+        if device_label == "cpu":
+            engine_label += " — em CPU (mais lento)"
         return _voice_result(
             wav_bytes=_wav_bytes_from_array(audio_array, sample_rate=sample_rate, speed=speed),
             engine_key=model_key,
-            engine_label=TTS_MODEL_DISPLAY_NAMES[model_key],
+            engine_label=engine_label,
             fallback=False,
         )
     except Exception as exc:
