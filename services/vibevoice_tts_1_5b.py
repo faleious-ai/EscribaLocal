@@ -45,11 +45,24 @@ CONVERTED_MODEL_DIRS = {
     "tts_1_5b": os.path.join(_PROJECT_ROOT, "models", "VibeVoice-1.5B-hf"),
 }
 
-_pipeline_model_keys = {"tts_1_5b"}
+_native_model_keys = {"tts_1_5b"}
 _direct_model_keys = {"tts_large"}
 
-_tts_pipelines: Dict[str, Any] = {}
-_pipeline_devices: Dict[str, str] = {}
+# Receita validada por round-trip TTS->Whisper em PT-BR (scripts/diag_tts_roundtrip.py):
+# template de chat do checkpoint + generate direto + referência de voz limpa +
+# cfg_scale 1.7 (o default 1.3 produzia pronúncia instável em frases curtas).
+DEFAULT_CFG_SCALE = 1.7
+ACOUSTIC_HOP = 3200  # amostras por frame acústico (24kHz / 7.5 frames/s)
+VIBEVOICE_SYSTEM_PROMPT = (
+    " Transform the text provided by various speakers into speech output, "
+    "utilizing the distinct voice of each respective speaker.\n"
+)
+VOICE_REFERENCE_TEXT = (
+    "Esta é uma amostra de voz para clonagem. A fala gerada deve soar clara e natural."
+)
+
+_native_models: Dict[str, Dict[str, Any]] = {}   # model_key -> {processor, model, device, gen_cfg}
+_voice_embeds_cache: Dict[str, Any] = {}          # f"{model_key}:{speaker_id}" -> tensor (n, hidden)
 _direct_processors: Dict[str, Any] = {}
 _direct_models: Dict[str, Any] = {}
 
@@ -82,51 +95,137 @@ def _voice_result(wav_bytes: bytes, engine_key: str, engine_label: str, fallback
 
 
 def get_tts_model_and_processor(model_key: str = "tts_1_5b"):
-    """Backwards-compatible helper for the Transformers TTS pipeline."""
-    return _get_transformers_pipeline(model_key)
+    """Helper de compatibilidade: retorna a entrada nativa carregada (ou None)."""
+    return _load_native_model(model_key)
 
 
-def _get_transformers_pipeline(model_key: str):
-    if model_key not in _pipeline_model_keys:
+def _load_native_model(model_key: str):
+    """Carrega processor+modelo do checkpoint convertido (cacheados).
+
+    A pipeline genérica text-to-speech do fork foi abandonada de propósito:
+    ela tokeniza o texto cru (sem o template de chat com Speaker/tokens de
+    fala) e limita a geração a 256 frames — o modelo nunca emitia o fim de
+    fala e a saída não era inteligível.
+    """
+    if model_key not in _native_model_keys:
         return None
-    if model_key in _tts_pipelines:
-        return _tts_pipelines[model_key]
+    if model_key in _native_models:
+        return _native_models[model_key]
 
-    model_id = _resolve_tts_source(model_key)
-    attempts = []
-    if torch.cuda.is_available():
-        attempts.append(("cuda", {"device": 0, "torch_dtype": torch.bfloat16}))
+    source = _resolve_tts_source(model_key)
+    attempts = ["cuda"] if torch.cuda.is_available() else []
     # CPU é fallback real: lento, mas é a voz verdadeira do VibeVoice — melhor
     # que cair no SAPI5 quando os 6GB de VRAM não comportam os pesos.
-    # Exceção: o Large (18.7GB) não cabe nem na RAM com folga; não tentar.
     if model_key != "tts_large":
-        attempts.append(("cpu", {"device": -1, "torch_dtype": torch.bfloat16}))
+        attempts.append("cpu")
 
-    for device_label, extra_kwargs in attempts:
+    for device_label in attempts:
         try:
             if device_label == "cuda":
                 from services.resource_arbiter import arbiter
                 arbiter.prepare_load(model_key)
             with use_custom_transformers():
-                from transformers import pipeline
+                from transformers import AutoModelForTextToWaveform, AutoProcessor
 
-                logger.info("Carregando pipeline VibeVoice TTS (%s) em %s...", model_id, device_label)
-                tts_pipeline = pipeline(
-                    task="text-to-speech",
-                    model=model_id,
-                    trust_remote_code=True,
-                    **extra_kwargs,
-                )
-            _tts_pipelines[model_key] = tts_pipeline
-            _pipeline_devices[model_key] = device_label
-            logger.info("Pipeline VibeVoice TTS carregada: %s (%s)", model_id, device_label)
-            return tts_pipeline
+                logger.info("Carregando VibeVoice TTS nativo (%s) em %s...", source, device_label)
+                processor = AutoProcessor.from_pretrained(source)
+                model = AutoModelForTextToWaveform.from_pretrained(
+                    source, dtype=torch.bfloat16,
+                ).to(device_label).eval()
+
+            import copy
+            gen_cfg = copy.deepcopy(model.generation_config)
+            gen_cfg.cfg_scale = DEFAULT_CFG_SCALE
+
+            entry = {"processor": processor, "model": model,
+                     "device": device_label, "gen_cfg": gen_cfg}
+            _native_models[model_key] = entry
+            logger.info("VibeVoice TTS nativo carregado: %s (%s)", source, device_label)
+            return entry
         except Exception as exc:
-            logger.warning(
-                "Nao foi possivel carregar a pipeline %s em %s: %s",
-                model_id, device_label, str(exc)[:400],
-            )
+            logger.warning("Falha ao carregar VibeVoice TTS nativo (%s) em %s: %s",
+                           source, device_label, str(exc)[:400])
     return None
+
+
+def _voice_reference_waveform(speaker_id: str) -> "np.ndarray | None":
+    """Amostra de FALA limpa em PT-BR (SAPI5, 24kHz) usada como referência de
+    clonagem por locutor. Sem referência o modelo 'inventa' uma voz instável e
+    a pronúncia degrada — comprovado no round-trip. Nunca usa tom senoidal."""
+    try:
+        import win32com.client
+
+        sapi = win32com.client.Dispatch("SAPI.SpVoice")
+        selected = _select_sapi_voice(sapi, speaker_id)
+        if selected is not None:
+            sapi.Voice = selected
+        stream = win32com.client.Dispatch("SAPI.SpMemoryStream")
+        stream.Format.Type = 30  # SPSF_24kHz16BitMono
+        sapi.AudioOutputStream = stream
+        sapi.Speak(VOICE_REFERENCE_TEXT)
+        pcm = np.frombuffer(bytes(stream.GetData()), dtype=np.int16)
+        if pcm.size < ACOUSTIC_HOP:
+            return None
+        return pcm.astype(np.float32) / 32768.0
+    except Exception as exc:
+        logger.warning("Sem referência de voz SAPI5 (%s); gerando sem condicionamento.", exc)
+        return None
+
+
+def _get_voice_embeds(entry: Dict[str, Any], model_key: str, speaker_id: str):
+    """Embeddings acústicos da referência do locutor (cacheados por sessão)."""
+    cache_key = f"{model_key}:{speaker_id}"
+    if cache_key in _voice_embeds_cache:
+        return _voice_embeds_cache[cache_key]
+
+    waveform = _voice_reference_waveform(speaker_id)
+    if waveform is None:
+        _voice_embeds_cache[cache_key] = None
+        return None
+
+    model, processor, device = entry["model"], entry["processor"], entry["device"]
+    features = processor.feature_extractor(
+        waveform, sampling_rate=24000, return_tensors="pt",
+        padding=True, pad_to_multiple_of=ACOUSTIC_HOP,
+    )["input_features"].to(device=device, dtype=torch.bfloat16)
+    n_frames = int(features.shape[-1] // ACOUSTIC_HOP)
+    mask = torch.ones((1, n_frames), dtype=torch.bool, device=device)
+    with torch.no_grad():
+        embeds = model.get_audio_features(features, mask)
+    _voice_embeds_cache[cache_key] = embeds
+    logger.info("Referência de voz preparada para %s: %d frames.", speaker_id, n_frames)
+    return embeds
+
+
+def build_vibevoice_prompt(script: str, pads_by_speaker: "Dict[str, int]") -> str:
+    """Monta o prompt EXATAMENTE como o chat_template.jinja do checkpoint:
+    system prompt + seção Voice input (pads por locutor) + Text input + início
+    da fala. Função pura — coberta por teste unitário."""
+    voice_section = ""
+    if any(pads_by_speaker.values()):
+        voice_section = " Voice input:\n"
+        for number, n_pads in pads_by_speaker.items():
+            if n_pads > 0:
+                voice_section += (
+                    f" Speaker {number}:<|vision_start|>"
+                    + "<|vision_pad|>" * n_pads
+                    + "<|vision_end|>\n"
+                )
+    text_section = "".join(f" {line}\n" for line in script.splitlines())
+    return (
+        VIBEVOICE_SYSTEM_PROMPT
+        + voice_section
+        + " Text input:\n"
+        + text_section
+        + " Speech output:\n"
+        + "<|vision_start|>"
+    )
+
+
+def _frames_cap_for(script: str) -> int:
+    # ~7.5 frames/s e ~2.5 palavras/s => ~3 frames/palavra; margem 6x p/ pausas.
+    words = max(1, len(script.split()))
+    return int(min(4000, max(120, words * 18 + 60)))
 
 
 def _get_direct_vibevoice_model(model_key: str):
@@ -384,39 +483,88 @@ def _wav_bytes_from_array(audio_array, sample_rate: int = 24000, speed: float = 
     return wav_io.getvalue()
 
 
-def _run_transformers_pipeline(
+def _run_native_vibevoice(
     text: str,
     model_key: str,
+    speaker_id: str,
     speed: float,
 ):
-    tts_pipeline = _get_transformers_pipeline(model_key)
-    if tts_pipeline is None:
+    """Geração nativa: template do checkpoint + condicionamento de voz por
+    locutor + generate custom do VibeVoice (EOS interno, CFG, diffusion).
+
+    Nota: o generate do VibeVoice usa SEMPRE argmax (a aleatoriedade real está
+    na difusão) — temperature/top_p/top_k do formulário não se aplicam aqui.
+    """
+    entry = _load_native_model(model_key)
+    if entry is None:
         return None
 
-    model_id = TTS_MODEL_IDS[model_key]
     try:
+        script = _normalize_script_for_vibevoice(text, speaker_id)
+        speaker_numbers = _unique_speaker_numbers(script)
+
         with use_custom_transformers():
-            output = tts_pipeline(text)
-        if not isinstance(output, dict):
-            raise RuntimeError("A pipeline TTS retornou um formato inesperado.")
-        audio_array = output.get("audio")
-        if audio_array is None:
-            audio_array = output.get("waveform")
-        if audio_array is None:
-            raise RuntimeError("A pipeline TTS nao retornou audio.")
-        sample_rate = output.get("sampling_rate") or output.get("sample_rate") or 24000
-        device_label = _pipeline_devices.get(model_key, "cuda")
-        engine_label = TTS_MODEL_DISPLAY_NAMES[model_key]
-        if device_label == "cpu":
-            engine_label += " — em CPU (mais lento)"
+            model, processor, device = entry["model"], entry["processor"], entry["device"]
+
+            embeds_per_speaker = []
+            pads_by_speaker: Dict[str, int] = {}
+            for number in speaker_numbers:
+                embeds = _get_voice_embeds(entry, model_key, _speaker_id_for_number(number, speaker_id))
+                pads_by_speaker[number] = int(embeds.shape[0]) if embeds is not None else 0
+                if embeds is not None:
+                    embeds_per_speaker.append(embeds)
+
+            prompt = build_vibevoice_prompt(script, pads_by_speaker)
+            inputs = processor(text=prompt)
+            input_ids = inputs["input_ids"].to(device)
+            attention_mask = inputs["attention_mask"].to(device)
+
+            generate_kwargs: Dict[str, Any] = dict(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                max_new_tokens=_frames_cap_for(script),
+                return_dict_in_generate=True,
+                generation_config=entry["gen_cfg"],
+            )
+            if embeds_per_speaker:
+                # O port do fork define get_audio_features mas não o conecta ao
+                # generate; o encaixe é feito aqui, no nível de embeddings, nas
+                # posições <|vision_pad|> da seção Voice input.
+                voice_embeds = torch.cat(embeds_per_speaker, dim=0)
+                embed_layer = model.get_input_embeddings()
+                inputs_embeds = embed_layer(input_ids).clone()
+                pad_positions = input_ids == int(model.config.speech_diffusion_id)
+                if int(pad_positions.sum().item()) == int(voice_embeds.shape[0]):
+                    inputs_embeds[pad_positions] = voice_embeds.to(inputs_embeds.dtype)
+                    generate_kwargs["inputs_embeds"] = inputs_embeds
+                else:
+                    logger.warning("Posições de voz (%d) != embeddings (%d); gerando sem condicionamento.",
+                                   int(pad_positions.sum().item()), int(voice_embeds.shape[0]))
+
+            with torch.no_grad():
+                output = model.generate(**generate_kwargs)
+
+        audio_list = getattr(output, "audio", None)
+        if not audio_list:
+            raise RuntimeError("O generate do VibeVoice não retornou áudio.")
+        audio_array = audio_list[0].detach().to(torch.float32).cpu().numpy().squeeze()
+
+        reach_max = getattr(output, "reach_max_step_sample", None)
+        if reach_max is not None and bool(reach_max[0].item()):
+            logger.warning("Geração atingiu o teto de frames (%d) sem fim de fala; áudio pode estar truncado.",
+                           generate_kwargs["max_new_tokens"])
+
+        engine_label = TTS_MODEL_DISPLAY_NAMES[model_key] + " — voz nativa"
+        if entry["device"] == "cpu":
+            engine_label += " (CPU, mais lento)"
         return _voice_result(
-            wav_bytes=_wav_bytes_from_array(audio_array, sample_rate=sample_rate, speed=speed),
+            wav_bytes=_wav_bytes_from_array(audio_array, sample_rate=24000, speed=speed),
             engine_key=model_key,
             engine_label=engine_label,
             fallback=False,
         )
     except Exception as exc:
-        logger.error("Erro na pipeline VibeVoice TTS (%s): %s", model_id, exc)
+        logger.error("Erro na geração nativa VibeVoice (%s): %s", model_key, exc, exc_info=True)
         return None
 
 
@@ -588,17 +736,20 @@ def generate_voice_1_5b_with_metadata(
             speed=speed,
         )
 
-    pipeline_result = _run_transformers_pipeline(text=text, model_key=model_key, speed=speed)
-    if pipeline_result:
-        return pipeline_result
+    native_result = _run_native_vibevoice(
+        text=text, model_key=model_key, speaker_id=speaker_id, speed=speed,
+    )
+    if native_result:
+        return native_result
 
     return _fallback_sapi_or_sine(text=text, speaker_id=speaker_id, speed=speed)
 
 
 def unload_tts_model():
-    if _tts_pipelines or _direct_models:
+    if _native_models or _direct_models:
         logger.info("Descarregando modelos VibeVoice TTS...")
-    _tts_pipelines.clear()
+    _native_models.clear()
+    _voice_embeds_cache.clear()
     _direct_processors.clear()
     _direct_models.clear()
     gc.collect()
@@ -614,7 +765,7 @@ from services.resource_arbiter import arbiter as _arbiter
 _arbiter.register_engine(
     engine="tts_1_5b",
     label="VibeVoice TTS 1.5B",
-    is_loaded=lambda: "tts_1_5b" in _tts_pipelines,
+    is_loaded=lambda: "tts_1_5b" in _native_models,
     unload=unload_tts_model,
     est_vram_mb=lambda: 5400.0,
     current_model=lambda: TTS_MODEL_IDS["tts_1_5b"],
