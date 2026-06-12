@@ -1442,6 +1442,27 @@ body {
     margin-top: 12px;
 }
 
+/* ===== BIBLIOTECA DE VOZES ===== */
+.vl-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px 10px;
+    padding: 8px 0;
+}
+
+.vl-grid label {
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+}
+
+.vl-grid .adv-number {
+    width: 84px;
+}
+
 /* ===== SETUP WIZARD & HISTÓRICO ===== */
 .wizard-step-body h2 {
     font-family: 'Outfit', sans-serif;
