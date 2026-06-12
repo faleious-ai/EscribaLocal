@@ -6,12 +6,11 @@ import torch
 from services.runtime_patches import apply_runtime_patches
 apply_runtime_patches()
 
-from services.transformers_loader import use_custom_transformers
+from services.transformers_loader import apply_vibevoice_fork_patches, use_custom_transformers
 
 with use_custom_transformers():
     from transformers import pipeline, AutoConfig, AutoModelForTextToWaveform
-    from transformers.models.vibevoice_acoustic_tokenizer.configuration_vibevoice_acoustic_tokenizer import VibeVoiceAcousticTokenizerConfig
-    VibeVoiceAcousticTokenizerConfig.decoder_depths = VibeVoiceAcousticTokenizerConfig.decoder_depths.setter(lambda self, val: None)
+    apply_vibevoice_fork_patches()
 
 
 import logging

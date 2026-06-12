@@ -8,6 +8,7 @@ temp_uploads/
 logs/
 config/
 data/
+models/
 
 # Fork vendored do transformers (~19GB, gerenciado manualmente)
 custom_transformers/
