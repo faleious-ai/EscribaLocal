@@ -49,6 +49,7 @@ from routers.parameters_routes import router as parameters_router
 from routers.environment_routes import router as environment_router
 from routers.logs_routes import router as logs_router
 from routers.presets_routes import router as presets_router
+from routers.voice_routes import router as voice_router
 from routers.setup_routes import router as setup_router
 
 logger = logging.getLogger("EscribaLocal.Main")
@@ -73,6 +74,7 @@ app.include_router(parameters_router)
 app.include_router(environment_router)
 app.include_router(logs_router)
 app.include_router(presets_router)
+app.include_router(voice_router)
 app.include_router(setup_router)
 
 
@@ -697,21 +699,53 @@ async def tts_generate(
     top_p: float = Form(0.95),
     top_k: int = Form(50),
     repetition_penalty: float = Form(1.1),
-    speed: float = Form(1.0)
+    speed: float = Form(1.0),
+    voice_id: str = Form(None),
+    speaker_voices: str = Form(None),
+    cfg_scale: float = Form(1.7),
+    n_diffusion_steps: int = Form(10),
+    max_frames: int = Form(0),
+    seed: int = Form(-1),
+    failure_policy: str = Form("cpu"),
+    device: str = Form("auto"),
 ):
     """
     Endpoint HTTP que gera áudio WAV a partir de texto usando o motor TTS selecionado.
+
+    Nota: temperature/top_p/top_k/repetition_penalty são aceitos por
+    compatibilidade, mas NÃO afetam o caminho nativo do 1.5B (argmax + difusão).
     """
     import io
-    if tts_model not in SUPPORTED_LONGFORM_TTS_MODELS | {"realtime_0_5b"}:
+    if tts_model == "realtime_0_5b":
+        # Adiado: o checkpoint usa model_type vibevoice_streaming, sem suporte
+        # nas libs atuais — selecioná-lo entregaria SAPI5 disfarçado.
+        raise HTTPException(
+            status_code=400,
+            detail="VibeVoice Realtime 0.5B: em desenvolvimento — indisponível nesta versão.",
+        )
+    if tts_model not in SUPPORTED_LONGFORM_TTS_MODELS:
         raise HTTPException(status_code=400, detail="Modelo TTS inválido.")
+
+    speaker_voices_map = None
+    if speaker_voices:
+        try:
+            speaker_voices_map = json.loads(speaker_voices)
+            if not isinstance(speaker_voices_map, dict):
+                raise ValueError("esperado objeto {speaker: voice_id}")
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=f"speaker_voices inválido: {exc}")
+
     try:
         record_app_event(
             "tts_generate_requested",
             requested_model=tts_model,
             speaker_id=speaker_id,
+            voice_id=voice_id,
             text_length=len(text or ""),
-            temperature=temperature,
+            cfg_scale=cfg_scale,
+            n_diffusion_steps=n_diffusion_steps,
+            failure_policy=failure_policy,
+            device=device,
             speed=speed,
         )
         # Executa no thread pool para não bloquear
@@ -726,15 +760,15 @@ async def tts_generate(
                 top_k=top_k,
                 repetition_penalty=repetition_penalty,
                 speed=speed,
-                model_key=tts_model
-            ) if tts_model in SUPPORTED_LONGFORM_TTS_MODELS else generate_voice_realtime_wav_with_metadata(
-                text=text,
-                speaker_id=speaker_id,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                repetition_penalty=repetition_penalty,
-                speed=speed
+                model_key=tts_model,
+                voice_id=voice_id,
+                speaker_voices=speaker_voices_map,
+                cfg_scale=cfg_scale,
+                n_diffusion_steps=n_diffusion_steps,
+                max_frames=max_frames,
+                seed=seed,
+                failure_policy=failure_policy,
+                device=device,
             )
         )
         def _header_safe(value) -> str:
@@ -751,19 +785,37 @@ async def tts_generate(
             "X-Escriba-TTS-Engine": _header_safe(voice_result.get("engine_label", tts_model)),
             "X-Escriba-TTS-Fallback": "true" if voice_result.get("fallback") else "false",
         }
+        if voice_result.get("voice_map"):
+            try:
+                from services import voice_profiles as _vp
+                names = []
+                for number, vid in sorted(voice_result["voice_map"].items()):
+                    voice_name = _vp.get_voice(vid).get("name", vid)
+                    names.append(f"Speaker {number}: {voice_name}")
+                headers["X-Escriba-TTS-Voices"] = _header_safe(" | ".join(names))
+            except Exception:
+                pass
+        if voice_result.get("params_used"):
+            headers["X-Escriba-TTS-Params"] = _header_safe(json.dumps(voice_result["params_used"]))
         record_app_event(
             "tts_generate_completed",
             requested_model=tts_model,
             engine_key=voice_result.get("engine_key", tts_model),
             engine_label=voice_result.get("engine_label", tts_model),
             fallback=bool(voice_result.get("fallback")),
+            voice_map=voice_result.get("voice_map"),
+            params_used=voice_result.get("params_used"),
             output_bytes=len(voice_result["wav_bytes"]),
         )
         return StreamingResponse(io.BytesIO(voice_result["wav_bytes"]), media_type="audio/wav", headers=headers)
+    except HTTPException:
+        raise
     except Exception as e:
+        from services.vibevoice_tts_1_5b import VoiceUnavailableError
         logger.error(f"Erro na geração de áudio TTS: {e}")
         record_exception_event("tts_generate_error", e, requested_model=tts_model)
-        raise HTTPException(status_code=500, detail=str(e))
+        status = 422 if isinstance(e, VoiceUnavailableError) else 500
+        raise HTTPException(status_code=status, detail=str(e))
 
 
 @app.websocket("/api/tts/stream")

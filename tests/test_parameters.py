@@ -12,7 +12,13 @@ def test_registry_metadata_complete():
     assert set(REGISTRY.keys()) == {"whisper", "vibevoice_asr", "tts"}
     assert len(REGISTRY["whisper"]) == 9
     assert len(REGISTRY["vibevoice_asr"]) == 9
-    assert len(REGISTRY["tts"]) == 7
+    # TTS: só parâmetros REAIS do caminho nativo do 1.5B (temperature/top_p/
+    # top_k/repetition_penalty foram removidos — argmax, sem efeito).
+    assert len(REGISTRY["tts"]) == 10
+    tts_names = {spec.name for spec in REGISTRY["tts"]}
+    assert {"temperature", "top_p", "top_k", "repetition_penalty"}.isdisjoint(tts_names)
+    assert {"voice_id", "cfg_scale", "n_diffusion_steps", "max_frames",
+            "seed", "failure_policy", "device"} <= tts_names
 
     for engine, specs in REGISTRY.items():
         for spec in specs:

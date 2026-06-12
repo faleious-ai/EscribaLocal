@@ -5,7 +5,7 @@ import io
 import logging
 import re
 import tempfile
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import scipy.io.wavfile as wavfile
@@ -99,7 +99,19 @@ def get_tts_model_and_processor(model_key: str = "tts_1_5b"):
     return _load_native_model(model_key)
 
 
-def _load_native_model(model_key: str):
+def get_model_revision(model_key: str = "tts_1_5b") -> str:
+    """Revisão do checkpoint em uso (hash do config.json do diretório/repos
+    resolvido). Invalida embeddings persistidos quando a conversão muda."""
+    source = _resolve_tts_source(model_key)
+    config_path = os.path.join(source, "config.json")
+    if os.path.exists(config_path):
+        import hashlib
+        with open(config_path, "rb") as handle:
+            return hashlib.sha256(handle.read()).hexdigest()[:12]
+    return f"repo:{source}"
+
+
+def _load_native_model(model_key: str, device_preference: str = "auto"):
     """Carrega processor+modelo do checkpoint convertido (cacheados).
 
     A pipeline genérica text-to-speech do fork foi abandonada de propósito:
@@ -109,15 +121,23 @@ def _load_native_model(model_key: str):
     """
     if model_key not in _native_model_keys:
         return None
-    if model_key in _native_models:
-        return _native_models[model_key]
+    cached = _native_models.get(model_key)
+    if cached is not None:
+        if device_preference in ("auto", cached["device"]):
+            return cached
+        # Preferência explícita mudou (ex.: cpu -> cuda): recarrega.
+        unload_tts_model()
 
     source = _resolve_tts_source(model_key)
-    attempts = ["cuda"] if torch.cuda.is_available() else []
-    # CPU é fallback real: lento, mas é a voz verdadeira do VibeVoice — melhor
-    # que cair no SAPI5 quando os 6GB de VRAM não comportam os pesos.
-    if model_key != "tts_large":
-        attempts.append("cpu")
+    if device_preference == "cuda":
+        attempts = ["cuda"] if torch.cuda.is_available() else []
+    elif device_preference == "cpu":
+        attempts = ["cpu"]
+    else:  # auto
+        attempts = ["cuda"] if torch.cuda.is_available() else []
+        # CPU é fallback real: lento, mas é a voz verdadeira do VibeVoice.
+        if model_key != "tts_large":
+            attempts.append("cpu")
 
     for device_label in attempts:
         try:
@@ -172,17 +192,11 @@ def _voice_reference_waveform(speaker_id: str) -> "np.ndarray | None":
         return None
 
 
-def _get_voice_embeds(entry: Dict[str, Any], model_key: str, speaker_id: str):
-    """Embeddings acústicos da referência do locutor (cacheados por sessão)."""
-    cache_key = f"{model_key}:{speaker_id}"
-    if cache_key in _voice_embeds_cache:
-        return _voice_embeds_cache[cache_key]
+class VoiceUnavailableError(RuntimeError):
+    """Voz escolhida ausente/corrompida — NUNCA cair silenciosamente em outra."""
 
-    waveform = _voice_reference_waveform(speaker_id)
-    if waveform is None:
-        _voice_embeds_cache[cache_key] = None
-        return None
 
+def _embeds_from_waveform(entry: Dict[str, Any], waveform: "np.ndarray"):
     model, processor, device = entry["model"], entry["processor"], entry["device"]
     features = processor.feature_extractor(
         waveform, sampling_rate=24000, return_tensors="pt",
@@ -191,10 +205,64 @@ def _get_voice_embeds(entry: Dict[str, Any], model_key: str, speaker_id: str):
     n_frames = int(features.shape[-1] // ACOUSTIC_HOP)
     mask = torch.ones((1, n_frames), dtype=torch.bool, device=device)
     with torch.no_grad():
-        embeds = model.get_audio_features(features, mask)
-    _voice_embeds_cache[cache_key] = embeds
-    logger.info("Referência de voz preparada para %s: %d frames.", speaker_id, n_frames)
-    return embeds
+        return model.get_audio_features(features, mask)
+
+
+def build_reference_embeddings(reference_wav_path: str):
+    """Builder usado pela biblioteca de vozes: tensor CPU + revisão do modelo."""
+    entry = _load_native_model("tts_1_5b")
+    if entry is None:
+        raise RuntimeError("Modelo VibeVoice 1.5B indisponível para extrair embeddings.")
+    from services.transcriber import decode_audio_ffmpeg
+
+    waveform = decode_audio_ffmpeg(reference_wav_path, sampling_rate=24000).astype(np.float32)
+    embeds = _embeds_from_waveform(entry, waveform)
+    return embeds.detach().to("cpu"), get_model_revision("tts_1_5b")
+
+
+def _embeds_for_voice(entry: Dict[str, Any], model_key: str, voice_id: str):
+    """Embeddings da voz (preset SAPI5 ou perfil persistido), no device.
+
+    Cache em memória por identidade real: model_key + revisão do checkpoint +
+    voice_id + hash da referência — trocar a gravação ou reconverter o modelo
+    invalida automaticamente.
+    """
+    from services import voice_profiles
+
+    revision = get_model_revision(model_key)
+    resolved = voice_profiles.resolve_voice_id(voice_id)
+
+    if voice_profiles.is_preset(resolved):
+        cache_key = f"{model_key}:{revision}:{resolved}:sapi5"
+        if cache_key not in _voice_embeds_cache:
+            speaker_hint = next(p["speaker_hint"] for p in voice_profiles.PRESET_VOICES
+                                if p["id"] == resolved)
+            waveform = _voice_reference_waveform(speaker_hint)
+            if waveform is None:
+                raise VoiceUnavailableError(
+                    f"Preset {resolved} indisponível (SAPI5 não respondeu). "
+                    "Crie uma voz personalizada na biblioteca de vozes."
+                )
+            _voice_embeds_cache[cache_key] = _embeds_from_waveform(entry, waveform)
+            logger.info("Referência do preset %s preparada (%d frames).",
+                        resolved, int(_voice_embeds_cache[cache_key].shape[0]))
+        return _voice_embeds_cache[cache_key]
+
+    try:
+        profile = voice_profiles.get_voice(resolved)
+        cache_key = f"{model_key}:{revision}:{resolved}:{profile.get('reference_hash')}"
+        if cache_key not in _voice_embeds_cache:
+            embeds_cpu = voice_profiles.load_embeddings(resolved)
+            _voice_embeds_cache[cache_key] = embeds_cpu.to(
+                device=entry["device"], dtype=torch.bfloat16,
+            )
+            logger.info("Embeddings da voz personalizada carregados (%d frames).",
+                        int(_voice_embeds_cache[cache_key].shape[0]))
+        return _voice_embeds_cache[cache_key]
+    except voice_profiles.VoiceNotFound as exc:
+        raise VoiceUnavailableError(str(exc))
+    except voice_profiles.InvalidVoice as exc:
+        raise VoiceUnavailableError(f"Voz {resolved} sem embeddings válidos: {exc}")
 
 
 def build_vibevoice_prompt(script: str, pads_by_speaker: "Dict[str, int]") -> str:
@@ -483,48 +551,102 @@ def _wav_bytes_from_array(audio_array, sample_rate: int = 24000, speed: float = 
     return wav_io.getvalue()
 
 
+def _resolve_speaker_voice_map(
+    speaker_numbers: List[str],
+    speaker_id: str,
+    voice_id: Optional[str],
+    speaker_voices: Optional[Dict[str, str]],
+) -> Dict[str, str]:
+    """Mapeia cada número de speaker do roteiro para um voice_id.
+
+    Prioridade: mapeamento explícito por speaker > voice_id único da request >
+    voz padrão da biblioteca > preset legado equivalente ao speaker_N.
+    """
+    from services import voice_profiles
+
+    explicit = {str(k).strip(): v for k, v in (speaker_voices or {}).items() if v}
+    default_single = voice_profiles.resolve_voice_id(voice_id) if voice_id else None
+    library_default = voice_profiles.get_default_voice_id()
+
+    mapping: Dict[str, str] = {}
+    for number in speaker_numbers:
+        if number in explicit:
+            mapping[number] = voice_profiles.resolve_voice_id(explicit[number])
+        elif default_single:
+            mapping[number] = default_single
+        elif library_default:
+            mapping[number] = library_default
+        else:
+            mapping[number] = voice_profiles.resolve_voice_id(
+                _speaker_id_for_number(number, speaker_id)
+            )
+    return mapping
+
+
 def _run_native_vibevoice(
     text: str,
     model_key: str,
     speaker_id: str,
     speed: float,
+    voice_id: Optional[str] = None,
+    speaker_voices: Optional[Dict[str, str]] = None,
+    cfg_scale: Optional[float] = None,
+    n_diffusion_steps: Optional[int] = None,
+    max_frames: int = 0,
+    seed: int = -1,
+    device_preference: str = "auto",
 ):
-    """Geração nativa: template do checkpoint + condicionamento de voz por
-    locutor + generate custom do VibeVoice (EOS interno, CFG, diffusion).
+    """Geração nativa: template do checkpoint + condicionamento de voz POR
+    LOCUTOR + generate custom do VibeVoice (EOS interno, CFG, diffusion).
 
-    Nota: o generate do VibeVoice usa SEMPRE argmax (a aleatoriedade real está
-    na difusão) — temperature/top_p/top_k do formulário não se aplicam aqui.
+    Parâmetros REAIS do caminho 1.5B (auditados em generation_vibevoice.py):
+    cfg_scale (mistura CFG), n_diffusion_steps (passos do scheduler),
+    max_new_tokens (teto de frames) e seed global do torch (o randn da
+    difusão não usa generator próprio). temperature/top_p/top_k/repetition_
+    penalty NÃO se aplicam (seleção de token é sempre argmax).
+
+    Levanta VoiceUnavailableError quando a voz escolhida não pode ser usada —
+    jamais troca silenciosamente por SAPI5/outra voz.
     """
-    entry = _load_native_model(model_key)
+    from services import voice_profiles
+
+    entry = _load_native_model(model_key, device_preference)
     if entry is None:
         return None
 
-    try:
-        script = _normalize_script_for_vibevoice(text, speaker_id)
-        speaker_numbers = _unique_speaker_numbers(script)
+    script = _normalize_script_for_vibevoice(text, speaker_id)
+    speaker_numbers = _unique_speaker_numbers(script)
+    voice_map = _resolve_speaker_voice_map(speaker_numbers, speaker_id, voice_id, speaker_voices)
 
+    with voice_profiles.voice_in_use(list(voice_map.values())):
         with use_custom_transformers():
             model, processor, device = entry["model"], entry["processor"], entry["device"]
 
             embeds_per_speaker = []
             pads_by_speaker: Dict[str, int] = {}
             for number in speaker_numbers:
-                embeds = _get_voice_embeds(entry, model_key, _speaker_id_for_number(number, speaker_id))
-                pads_by_speaker[number] = int(embeds.shape[0]) if embeds is not None else 0
-                if embeds is not None:
-                    embeds_per_speaker.append(embeds)
+                embeds = _embeds_for_voice(entry, model_key, voice_map[number])
+                pads_by_speaker[number] = int(embeds.shape[0])
+                embeds_per_speaker.append(embeds)
 
             prompt = build_vibevoice_prompt(script, pads_by_speaker)
             inputs = processor(text=prompt)
             input_ids = inputs["input_ids"].to(device)
             attention_mask = inputs["attention_mask"].to(device)
 
+            import copy
+            run_cfg = copy.deepcopy(entry["gen_cfg"])
+            run_cfg.cfg_scale = float(cfg_scale) if cfg_scale else DEFAULT_CFG_SCALE
+            if n_diffusion_steps:
+                run_cfg.n_diffusion_steps = int(n_diffusion_steps)
+            frames_cap = int(max_frames) if max_frames and int(max_frames) > 0 else _frames_cap_for(script)
+
             generate_kwargs: Dict[str, Any] = dict(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
-                max_new_tokens=_frames_cap_for(script),
+                max_new_tokens=frames_cap,
                 return_dict_in_generate=True,
-                generation_config=entry["gen_cfg"],
+                generation_config=run_cfg,
             )
             if embeds_per_speaker:
                 # O port do fork define get_audio_features mas não o conecta ao
@@ -534,38 +656,55 @@ def _run_native_vibevoice(
                 embed_layer = model.get_input_embeddings()
                 inputs_embeds = embed_layer(input_ids).clone()
                 pad_positions = input_ids == int(model.config.speech_diffusion_id)
-                if int(pad_positions.sum().item()) == int(voice_embeds.shape[0]):
-                    inputs_embeds[pad_positions] = voice_embeds.to(inputs_embeds.dtype)
-                    generate_kwargs["inputs_embeds"] = inputs_embeds
-                else:
-                    logger.warning("Posições de voz (%d) != embeddings (%d); gerando sem condicionamento.",
-                                   int(pad_positions.sum().item()), int(voice_embeds.shape[0]))
+                if int(pad_positions.sum().item()) != int(voice_embeds.shape[0]):
+                    raise VoiceUnavailableError(
+                        f"Inconsistência no condicionamento de voz: {int(pad_positions.sum().item())} "
+                        f"posições vs {int(voice_embeds.shape[0])} embeddings."
+                    )
+                inputs_embeds[pad_positions] = voice_embeds.to(inputs_embeds.dtype)
+                generate_kwargs["inputs_embeds"] = inputs_embeds
+
+            if seed is not None and int(seed) >= 0:
+                # O randn da difusão usa o gerador global do torch; semear
+                # reproduz o resultado na mesma máquina/device/dtype.
+                torch.manual_seed(int(seed))
+                if torch.cuda.is_available():
+                    torch.cuda.manual_seed_all(int(seed))
 
             with torch.no_grad():
                 output = model.generate(**generate_kwargs)
 
-        audio_list = getattr(output, "audio", None)
-        if not audio_list:
-            raise RuntimeError("O generate do VibeVoice não retornou áudio.")
-        audio_array = audio_list[0].detach().to(torch.float32).cpu().numpy().squeeze()
+    audio_list = getattr(output, "audio", None)
+    if not audio_list:
+        raise RuntimeError("O generate do VibeVoice não retornou áudio.")
+    audio_array = audio_list[0].detach().to(torch.float32).cpu().numpy().squeeze()
 
-        reach_max = getattr(output, "reach_max_step_sample", None)
-        if reach_max is not None and bool(reach_max[0].item()):
-            logger.warning("Geração atingiu o teto de frames (%d) sem fim de fala; áudio pode estar truncado.",
-                           generate_kwargs["max_new_tokens"])
+    reach_max = getattr(output, "reach_max_step_sample", None)
+    truncated = bool(reach_max[0].item()) if reach_max is not None else False
+    if truncated:
+        logger.warning("Geração atingiu o teto de frames (%d) sem fim de fala; áudio pode estar truncado.",
+                       frames_cap)
 
-        engine_label = TTS_MODEL_DISPLAY_NAMES[model_key] + " - voz nativa"
-        if entry["device"] == "cpu":
-            engine_label += " (CPU, mais lento)"
-        return _voice_result(
-            wav_bytes=_wav_bytes_from_array(audio_array, sample_rate=24000, speed=speed),
-            engine_key=model_key,
-            engine_label=engine_label,
-            fallback=False,
-        )
-    except Exception as exc:
-        logger.error("Erro na geração nativa VibeVoice (%s): %s", model_key, exc, exc_info=True)
-        return None
+    engine_label = TTS_MODEL_DISPLAY_NAMES[model_key] + " - voz nativa"
+    if entry["device"] == "cpu":
+        engine_label += " (CPU, mais lento)"
+    result = _voice_result(
+        wav_bytes=_wav_bytes_from_array(audio_array, sample_rate=24000, speed=speed),
+        engine_key=model_key,
+        engine_label=engine_label,
+        fallback=False,
+    )
+    result["voice_map"] = voice_map
+    result["params_used"] = {
+        "cfg_scale": run_cfg.cfg_scale,
+        "n_diffusion_steps": getattr(run_cfg, "n_diffusion_steps", None),
+        "max_frames": frames_cap,
+        "seed": int(seed) if seed is not None and int(seed) >= 0 else None,
+        "device": entry["device"],
+        "speed": speed,
+        "truncated": truncated,
+    }
+    return result
 
 
 def _run_direct_vibevoice(
@@ -718,11 +857,32 @@ def generate_voice_1_5b_with_metadata(
     repetition_penalty: float = 1.1,
     speed: float = 1.0,
     model_key: str = "tts_1_5b",
+    voice_id: Optional[str] = None,
+    speaker_voices: Optional[Dict[str, str]] = None,
+    cfg_scale: Optional[float] = None,
+    n_diffusion_steps: Optional[int] = None,
+    max_frames: int = 0,
+    seed: int = -1,
+    failure_policy: str = "cpu",
+    device: str = "auto",
 ) -> Dict[str, Any]:
+    """Geração TTS 1.5B.
+
+    temperature/top_p/top_k/repetition_penalty são aceitos por compatibilidade,
+    mas NÃO afetam o caminho nativo do 1.5B (seleção de token é argmax; a
+    aleatoriedade real é a difusão, controlada por seed/n_diffusion_steps).
+
+    failure_policy: "fail" (sem retry/fallback), "cpu" (tenta CPU quando a GPU
+    falha) ou "sapi5" (permite a voz do Windows como último recurso, ROTULADA
+    como fallback). Voz personalizada inválida sempre é erro — nunca é trocada
+    silenciosamente.
+    """
     if model_key not in TTS_MODEL_IDS:
         raise ValueError(f"Modelo TTS invalido: {model_key}")
     if not text or not text.strip():
         raise ValueError("Informe um texto para gerar voz.")
+    if failure_policy not in ("fail", "cpu", "sapi5"):
+        raise ValueError(f"failure_policy inválida: {failure_policy}")
 
     if model_key == "tts_large":
         return _run_direct_vibevoice(
@@ -736,13 +896,40 @@ def generate_voice_1_5b_with_metadata(
             speed=speed,
         )
 
-    native_result = _run_native_vibevoice(
-        text=text, model_key=model_key, speaker_id=speaker_id, speed=speed,
-    )
-    if native_result:
-        return native_result
+    if device != "auto":
+        device_preference = device
+    elif failure_policy == "fail":
+        # "fail" = sem retry implícito em CPU: usa só o melhor device disponível.
+        device_preference = "cuda" if torch.cuda.is_available() else "cpu"
+    else:
+        device_preference = "auto"
 
-    return _fallback_sapi_or_sine(text=text, speaker_id=speaker_id, speed=speed)
+    native_error: Optional[str] = None
+    try:
+        native_result = _run_native_vibevoice(
+            text=text, model_key=model_key, speaker_id=speaker_id, speed=speed,
+            voice_id=voice_id, speaker_voices=speaker_voices,
+            cfg_scale=cfg_scale, n_diffusion_steps=n_diffusion_steps,
+            max_frames=max_frames, seed=seed, device_preference=device_preference,
+        )
+        if native_result:
+            return native_result
+        native_error = "modelo VibeVoice 1.5B não pôde ser carregado (ver logs)."
+    except VoiceUnavailableError:
+        # Voz escolhida indisponível: erro claro, NUNCA trocar de voz.
+        raise
+    except Exception as exc:
+        logger.error("Erro na geração nativa VibeVoice: %s", exc, exc_info=True)
+        native_error = str(exc)
+
+    if failure_policy == "sapi5":
+        logger.warning("Geração nativa falhou (%s); usando SAPI5 por política explícita.",
+                       native_error)
+        return _fallback_sapi_or_sine(text=text, speaker_id=speaker_id, speed=speed)
+    raise RuntimeError(
+        f"Falha na geração com o VibeVoice 1.5B: {native_error} "
+        f"(política '{failure_policy}' — sem fallback automático)."
+    )
 
 
 def unload_tts_model():
@@ -778,3 +965,10 @@ _arbiter.register_engine(
     est_vram_mb=lambda: 19000.0,
     current_model=lambda: TTS_MODEL_IDS["tts_large"],
 )
+
+# Registra o builder de embeddings na biblioteca de vozes (import tardio no
+# voice_profiles evita ciclo; este módulo é o único dono do modelo 1.5B).
+from services import voice_profiles as _voice_profiles
+
+_voice_profiles.set_embedding_builder(build_reference_embeddings,
+                                      lambda: get_model_revision("tts_1_5b"))

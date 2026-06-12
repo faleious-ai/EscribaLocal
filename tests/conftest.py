@@ -50,6 +50,16 @@ def isolated_config(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def isolated_voices(tmp_path, monkeypatch):
+    """Biblioteca de vozes em diretório temporário (nunca toca data/voices real)."""
+    from services import voice_profiles
+
+    voices_dir = tmp_path / "voices"
+    monkeypatch.setattr(voice_profiles, "VOICES_DIR", voices_dir)
+    return voices_dir
+
+
+@pytest.fixture(autouse=True)
 def isolated_retention(tmp_path, monkeypatch):
     """Redireciona a pasta de uploads retidos para um diretório temporário isolado por teste."""
     from services import input_retention

@@ -837,28 +837,34 @@ function setupActions() {
             formData.append("text", text);
             formData.append("tts_model", elements.inputTtsModel.value);
             formData.append("speaker_id", elements.inputTtsSpeaker.value);
-            formData.append("temperature", elements.inputTtsTemp.value);
-            formData.append("repetition_penalty", elements.inputTtsRepPenalty.value);
             formData.append("speed", elements.inputTtsSpeed.value);
-            
+            // Voz da biblioteca + parâmetros REAIS do 1.5B (cfg/steps/seed/política)
+            if (window.collectTtsExtras) {
+                for (const [key, value] of Object.entries(window.collectTtsExtras("single"))) {
+                    formData.append(key, value);
+                }
+            }
+
             try {
                 const response = await fetch("/api/tts/generate", {
                     method: "POST",
                     body: formData
                 });
-                
+
                 if (!response.ok) {
                     throw new Error(await readErrorMessage(response, "Erro na geração do áudio."));
                 }
-                const engineLabel = response.headers.get("X-Escriba-TTS-Engine") || getSelectedTtsModelLabel();
+                let engineLabel = response.headers.get("X-Escriba-TTS-Engine") || getSelectedTtsModelLabel();
+                const voicesUsed = response.headers.get("X-Escriba-TTS-Voices");
+                if (voicesUsed) engineLabel += ` · ${voicesUsed}`;
                 const fallbackUsed = response.headers.get("X-Escriba-TTS-Fallback") === "true";
-                
+
                 const blob = await response.blob();
                 const audioUrl = URL.createObjectURL(blob);
-                
+
                 elements.ttsAudioPlayerSingle.src = audioUrl;
                 elements.btnDownloadTtsSingle.href = audioUrl;
-                
+
                 elements.ttsResultSingle.style.display = "block";
                 setTtsEngineStatus(
                     elements.ttsEngineStatusSingle,
@@ -909,20 +915,26 @@ function setupActions() {
             formData.append("text", text);
             formData.append("tts_model", elements.inputTtsModel.value);
             formData.append("speaker_id", elements.inputTtsSpeaker.value);
-            formData.append("temperature", elements.inputTtsTemp.value);
-            formData.append("repetition_penalty", elements.inputTtsRepPenalty.value);
             formData.append("speed", elements.inputTtsSpeed.value);
-            
+            // No diálogo, inclui o mapa Speaker N -> voz da biblioteca
+            if (window.collectTtsExtras) {
+                for (const [key, value] of Object.entries(window.collectTtsExtras("dialog"))) {
+                    formData.append(key, value);
+                }
+            }
+
             try {
                 const response = await fetch("/api/tts/generate", {
                     method: "POST",
                     body: formData
                 });
-                
+
                 if (!response.ok) {
                     throw new Error(await readErrorMessage(response, "Erro na geração do diálogo."));
                 }
-                const engineLabel = response.headers.get("X-Escriba-TTS-Engine") || getSelectedTtsModelLabel();
+                let engineLabel = response.headers.get("X-Escriba-TTS-Engine") || getSelectedTtsModelLabel();
+                const voicesUsed = response.headers.get("X-Escriba-TTS-Voices");
+                if (voicesUsed) engineLabel += ` · ${voicesUsed}`;
                 const fallbackUsed = response.headers.get("X-Escriba-TTS-Fallback") === "true";
                 
                 const blob = await response.blob();

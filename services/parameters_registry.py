@@ -177,55 +177,86 @@ _VIBEVOICE_ASR_PARAMS: List[ParameterSpec] = [
     ),
 ]
 
+# Auditoria do caminho nativo do 1.5B (generation_vibevoice.py do fork):
+# a seleção de token é SEMPRE argmax — temperature/top_p/top_k/repetition_
+# penalty NÃO afetam a geração e foram removidos deste registro. Os controles
+# reais são cfg_scale, n_diffusion_steps, max_new_tokens (frames) e a seed
+# global da difusão.
 _TTS_PARAMS: List[ParameterSpec] = [
     ParameterSpec(
         name="tts_model", engine="tts", type="enum", default="tts_1_5b",
-        choices=("tts_1_5b", "tts_large", "realtime_0_5b"),
+        choices=("tts_1_5b", "tts_large"),
         label="Modelo TTS",
-        description="1.5B = qualidade alta (~5.4GB VRAM); realtime 0.5B = baixa latência; Large = 18.7GB, não recomendado em 6GB.",
+        description="1.5B = qualidade alta (~5.4GB VRAM); Large = 18.7GB, não recomendado em 6GB. Realtime 0.5B: em desenvolvimento — indisponível.",
         impact="misto",
         risks="tts_large excede a VRAM deste hardware (offload lento).",
     ),
     ParameterSpec(
-        name="speaker_id", engine="tts", type="enum", default="speaker_1",
-        choices=("speaker_1", "speaker_2", "speaker_3", "speaker_4"),
-        label="Voz/Locutor",
-        description="Identidade vocal usada na síntese.",
+        name="voice_id", engine="tts", type="str", default=None,
+        label="Voz (biblioteca)",
+        description="Voz da biblioteca: preset local (voz do Windows) ou perfil clonado por gravação/upload.",
         impact="conteudo",
     ),
     ParameterSpec(
-        name="temperature", engine="tts", type="float", default=0.7, min=0.1, max=1.2,
-        label="Temperatura",
-        description="Variabilidade da prosódia. Baixa = estável; alta = expressiva (e menos previsível).",
-        impact="qualidade",
-        advanced=True,
-    ),
-    ParameterSpec(
-        name="top_p", engine="tts", type="float", default=0.95, min=0.0, max=1.0,
-        label="Top-P (nucleus)",
-        description="Limita a amostragem aos tokens mais prováveis.",
-        impact="qualidade",
-        advanced=True,
-    ),
-    ParameterSpec(
-        name="top_k", engine="tts", type="int", default=50, min=0, max=100,
-        label="Top-K",
-        description="Considera apenas os K tokens mais prováveis na amostragem.",
-        impact="qualidade",
-        advanced=True,
-    ),
-    ParameterSpec(
-        name="repetition_penalty", engine="tts", type="float", default=1.1, min=1.0, max=1.5,
-        label="Penalidade de repetição",
-        description="Evita travamentos/loops na geração de áudio.",
-        impact="qualidade",
+        name="speaker_id", engine="tts", type="enum", default="speaker_1",
+        choices=("speaker_1", "speaker_2", "speaker_3", "speaker_4"),
+        label="Locutor (legado)",
+        description="Compatibilidade: speaker_N equivale ao preset local N quando nenhuma voz da biblioteca é escolhida.",
+        impact="conteudo",
         advanced=True,
     ),
     ParameterSpec(
         name="speed", engine="tts", type="float", default=1.0, min=0.5, max=2.0,
         label="Velocidade",
-        description="Multiplicador de velocidade da fala (0.5x a 2.0x).",
+        description="Multiplicador de velocidade aplicado APÓS a geração (resample).",
         impact="conteudo",
+    ),
+    ParameterSpec(
+        name="cfg_scale", engine="tts", type="float", default=1.7, min=1.0, max=3.0,
+        label="CFG (adesão ao texto)",
+        description="Classifier-Free Guidance da difusão. Maior = pronúncia mais fiel ao texto; menor = voz mais livre/expressiva. 1.7 validado em PT-BR por round-trip.",
+        impact="qualidade",
+        risks="Abaixo de 1.4 a pronúncia em PT-BR degrada; acima de 2.5 a voz fica tensa/metálica.",
+        advanced=True,
+    ),
+    ParameterSpec(
+        name="n_diffusion_steps", engine="tts", type="int", default=10, min=4, max=40,
+        label="Passos de difusão",
+        description="Passos do scheduler (DPMSolver) por frame de áudio. Mais passos = mais fidelidade e mais tempo de geração (linear).",
+        impact="misto",
+        advanced=True,
+    ),
+    ParameterSpec(
+        name="max_frames", engine="tts", type="int", default=0, min=0, max=4000,
+        label="Teto de frames",
+        description="Limite de frames acústicos (7.5/s ≈ 0.13s cada). 0 = automático proporcional ao texto. A geração normalmente termina antes, por fim de fala.",
+        impact="memoria",
+        risks="Teto baixo demais trunca a fala (a resposta indica truncamento).",
+        advanced=True,
+    ),
+    ParameterSpec(
+        name="seed", engine="tts", type="int", default=-1, min=-1, max=2147483647,
+        label="Seed da difusão",
+        description="-1 = aleatória. Valor fixo reproduz a mesma tomada na mesma máquina/dispositivo/dtype.",
+        impact="conteudo",
+        advanced=True,
+    ),
+    ParameterSpec(
+        name="failure_policy", engine="tts", type="enum", default="cpu",
+        choices=("fail", "cpu", "sapi5"),
+        label="Política de falha",
+        description="fail = erro sem fallback; cpu = tenta CPU quando a GPU falhar (voz real, lenta); sapi5 = permite voz do Windows como último recurso, sempre rotulada.",
+        impact="misto",
+        risks="Voz personalizada inválida sempre gera erro — nenhuma política troca a voz escolhida silenciosamente.",
+        advanced=True,
+    ),
+    ParameterSpec(
+        name="device", engine="tts", type="enum", default="auto",
+        choices=("auto", "cuda", "cpu"),
+        label="Dispositivo",
+        description="auto = GPU com retry em CPU; cuda/cpu forçam o dispositivo (trocar exige recarregar o modelo, feito automaticamente).",
+        impact="velocidade",
+        advanced=True,
     ),
 ]
 

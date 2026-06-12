@@ -36,8 +36,8 @@ PRESETS: List[Dict[str, Any]] = [
             "vibevoice_asr": {"vibevoice_diarization": False, "vibevoice_chunk_size": 30.0,
                               "vibevoice_temperature": 0.0, "vibevoice_repetition_penalty": 1.1,
                               "vibevoice_num_beams": 1, "vibevoice_max_new_tokens": 2048},
-            "tts": {"tts_model": "realtime_0_5b", "temperature": 0.5, "top_p": 0.9,
-                    "top_k": 40, "repetition_penalty": 1.1},
+            "tts": {"tts_model": "tts_1_5b", "speed": 1.0, "device": "cpu",
+                    "failure_policy": "sapi5"},
         },
     },
     {
@@ -54,8 +54,8 @@ PRESETS: List[Dict[str, Any]] = [
             "vibevoice_asr": {"vibevoice_diarization": True, "vibevoice_chunk_size": 30.0,
                               "vibevoice_temperature": 0.0, "vibevoice_repetition_penalty": 1.1,
                               "vibevoice_num_beams": 1, "vibevoice_max_new_tokens": 2048},
-            "tts": {"tts_model": "realtime_0_5b", "temperature": 0.5, "top_p": 0.9,
-                    "top_k": 40, "repetition_penalty": 1.1},
+            "tts": {"tts_model": "tts_1_5b", "speed": 1.0, "device": "auto",
+                    "failure_policy": "cpu", "cfg_scale": 1.7, "n_diffusion_steps": 10},
         },
     },
     {
@@ -72,14 +72,14 @@ PRESETS: List[Dict[str, Any]] = [
             "vibevoice_asr": {"vibevoice_diarization": True, "vibevoice_chunk_size": 45.0,
                               "vibevoice_temperature": 0.0, "vibevoice_repetition_penalty": 1.1,
                               "vibevoice_num_beams": 1, "vibevoice_max_new_tokens": 2048},
-            "tts": {"tts_model": "tts_1_5b", "temperature": 0.7, "top_p": 0.95,
-                    "top_k": 50, "repetition_penalty": 1.1},
+            "tts": {"tts_model": "tts_1_5b", "speed": 1.0, "device": "auto",
+                    "failure_policy": "cpu", "cfg_scale": 1.7, "n_diffusion_steps": 12},
         },
     },
     {
         "id": "maximo-desempenho",
         "label": "Máximo desempenho",
-        "description": "Velocidade máxima: Whisper large-v3-turbo quantizado (int8_float16, ~1GB) com beam 1, e TTS realtime para resposta imediata.",
+        "description": "Velocidade máxima: Whisper large-v3-turbo quantizado (int8_float16, ~1GB) com beam 1, e TTS 1.5B com menos passos de difusão.",
         "min_vram_mb": 1500,
         "uses_cuda": True,
         "benchmark_dependent": False,
@@ -90,8 +90,8 @@ PRESETS: List[Dict[str, Any]] = [
             "vibevoice_asr": {"vibevoice_diarization": True, "vibevoice_chunk_size": 45.0,
                               "vibevoice_temperature": 0.0, "vibevoice_repetition_penalty": 1.1,
                               "vibevoice_num_beams": 1, "vibevoice_max_new_tokens": 2048},
-            "tts": {"tts_model": "realtime_0_5b", "temperature": 0.5, "top_p": 0.9,
-                    "top_k": 40, "repetition_penalty": 1.1},
+            "tts": {"tts_model": "tts_1_5b", "speed": 1.0, "device": "auto",
+                    "failure_policy": "cpu", "cfg_scale": 1.7, "n_diffusion_steps": 8},
         },
     },
     {
@@ -108,8 +108,8 @@ PRESETS: List[Dict[str, Any]] = [
             "vibevoice_asr": {"vibevoice_diarization": True, "vibevoice_chunk_size": 60.0,
                               "vibevoice_temperature": 0.0, "vibevoice_repetition_penalty": 1.05,
                               "vibevoice_num_beams": 1, "vibevoice_max_new_tokens": 4096},
-            "tts": {"tts_model": "tts_large", "temperature": 0.7, "top_p": 0.95,
-                    "top_k": 50, "repetition_penalty": 1.1},
+            "tts": {"tts_model": "tts_large", "speed": 1.0, "device": "auto",
+                    "failure_policy": "fail"},
         },
     },
     {
@@ -127,8 +127,8 @@ PRESETS: List[Dict[str, Any]] = [
                               "vibevoice_temperature": 0.2, "vibevoice_top_p": 0.9,
                               "vibevoice_repetition_penalty": 1.1, "vibevoice_num_beams": 1,
                               "vibevoice_max_new_tokens": 4096},
-            "tts": {"tts_model": "tts_1_5b", "temperature": 0.9, "top_p": 0.95,
-                    "top_k": 60, "repetition_penalty": 1.1},
+            "tts": {"tts_model": "tts_1_5b", "speed": 1.0, "device": "auto",
+                    "failure_policy": "cpu", "cfg_scale": 1.4, "n_diffusion_steps": 20},
         },
     },
 ]
@@ -226,11 +226,22 @@ def form_params_to_config_defaults(engine_params: Dict[str, Dict[str, Any]]) -> 
 
 
 def config_defaults_to_form_params(defaults: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-    """Converte defaults do config store para os nomes de formulário."""
+    """Converte defaults do config store para os nomes de formulário.
+
+    Campos legados do config que não existem mais no registro (ex.:
+    temperature do TTS, sem efeito no caminho nativo do 1.5B) são omitidos.
+    """
+    from services.parameters_registry import REGISTRY
+
     converted: Dict[str, Dict[str, Any]] = {}
     for engine, params in (defaults or {}).items():
         mapping = _CONFIG_TO_FORM.get(engine, {})
-        converted[engine] = {mapping.get(name, name): value for name, value in params.items()}
+        registry_names = {spec.name for spec in REGISTRY.get(engine, [])}
+        converted[engine] = {
+            mapping.get(name, name): value
+            for name, value in params.items()
+            if not registry_names or mapping.get(name, name) in registry_names
+        }
     return converted
 
 
