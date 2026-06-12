@@ -554,7 +554,7 @@ def _run_native_vibevoice(
             logger.warning("Geração atingiu o teto de frames (%d) sem fim de fala; áudio pode estar truncado.",
                            generate_kwargs["max_new_tokens"])
 
-        engine_label = TTS_MODEL_DISPLAY_NAMES[model_key] + " — voz nativa"
+        engine_label = TTS_MODEL_DISPLAY_NAMES[model_key] + " - voz nativa"
         if entry["device"] == "cpu":
             engine_label += " (CPU, mais lento)"
         return _voice_result(
