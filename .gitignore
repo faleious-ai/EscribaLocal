@@ -1,0 +1,21 @@
+# Ambiente Python
+.venv/
+__pycache__/
+*.pyc
+
+# Dados de runtime (gerados pela aplicacao; nunca versionar)
+temp_uploads/
+logs/
+config/
+data/
+models/
+
+# Fork vendored do transformers (~19GB, gerenciado manualmente)
+custom_transformers/
+
+# Area de rascunho e experimentos locais
+scratch/
+
+# Ferramentas locais
+.claude/
+EscribaLocal.zip
