@@ -282,6 +282,25 @@ class JobManager:
         consolidated.sort(key=lambda e: e.get("created_at") or 0, reverse=True)
         return consolidated[offset:offset + limit]
 
+    def find_history_job(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """Busca um job específico por ID em todo o histórico persistido."""
+        with self._history_lock:
+            if not self._history_path.exists():
+                return None
+            latest_entry = None
+            with self._history_path.open("r", encoding="utf-8", errors="replace") as history_file:
+                for line in history_file:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if entry.get("job_id") == job_id:
+                        latest_entry = entry
+            return latest_entry
+
     # ------------------------------------------------------------ internos
 
     def _notify_subscribers(self, job: Optional[Job], event: Dict[str, Any], close: bool = False) -> None:

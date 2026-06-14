@@ -24,7 +24,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 from services.app_logging import record_app_event, record_exception_event
-from services.jobs import JobState, job_manager
+from services.job_execution import run_blocking_job
+from services.jobs import job_manager
 
 WHISPER_ALLOW_PATTERNS = (
     "config.json",
@@ -335,28 +336,50 @@ def _resolve_repo_and_files(spec: ModelSpec) -> Tuple[str, int, List[str]]:
     )
 
 
-def _download_file_interruptible(repo_id: str, filename: str, cache_dir: Path, cancel_event: Optional[threading.Event]) -> None:
-    """Baixa um arquivo; se cancelado no meio, abandona a thread (o arquivo em
-    andamento termina em segundo plano e fica aproveitável no cache)."""
-    result: Dict[str, Any] = {}
+def _run_thread_with_outcome(
+    target: Callable[[], None],
+    *,
+    thread_name: str,
+    cancel_event: Optional[threading.Event] = None,
+    cancelled_exception: type[BaseException] = JobCancelled,
+    poll_timeout: float = 0.25,
+) -> Dict[str, Any]:
+    """Executa um worker em thread e consolida seu desfecho."""
+    outcome: Dict[str, Any] = {}
 
     def worker():
         try:
-            from huggingface_hub import hf_hub_download
-
-            hf_hub_download(repo_id=repo_id, filename=filename, cache_dir=str(cache_dir))
-            result["ok"] = True
+            target()
+            outcome["ok"] = True
+        except cancelled_exception:
+            outcome["cancelled"] = True
         except Exception as exc:
-            result["error"] = exc
+            outcome["error"] = exc
 
-    thread = threading.Thread(target=worker, daemon=True, name=f"dl-{filename}")
+    thread = threading.Thread(target=worker, daemon=True, name=thread_name)
     thread.start()
     while thread.is_alive():
         if cancel_event is not None and cancel_event.is_set():
-            raise JobCancelled()
-        thread.join(timeout=0.25)
-    if "error" in result:
-        raise result["error"]
+            raise cancelled_exception()
+        thread.join(timeout=poll_timeout)
+    return outcome
+
+
+def _download_file_interruptible(repo_id: str, filename: str, cache_dir: Path, cancel_event: Optional[threading.Event]) -> None:
+    """Baixa um arquivo; se cancelado no meio, abandona a thread (o arquivo em
+    andamento termina em segundo plano e fica aproveitável no cache)."""
+    def download_file() -> None:
+        from huggingface_hub import hf_hub_download
+
+        hf_hub_download(repo_id=repo_id, filename=filename, cache_dir=str(cache_dir))
+
+    outcome = _run_thread_with_outcome(
+        download_file,
+        thread_name=f"dl-{filename}",
+        cancel_event=cancel_event,
+    )
+    if "error" in outcome:
+        raise outcome["error"]
 
 
 class _ProgressPoller:
@@ -450,26 +473,31 @@ def start_download_job(model_id: str) -> str:
     )
 
     def worker():
-        job_manager.start(job.job_id)
-        try:
-            summary = _download_all_files(
+        def run_download(publish, cancel_event):
+            return _download_all_files(
                 spec,
-                emit=lambda event: job_manager.publish(job.job_id, event),
-                cancel_event=job.cancel_event,
+                emit=publish,
+                cancel_event=cancel_event,
             )
-            job_manager.publish(job.job_id, {"type": "done", "result": summary})
-            job_manager.finish(job.job_id, JobState.COMPLETED, result_summary=summary)
-        except JobCancelled:
-            job_manager.publish(job.job_id, {
+        def cancelled_event(_exc):
+            return {
                 "type": "cancelled",
                 "message": "Download cancelado. Arquivos já baixados permanecem no cache; "
                            "um arquivo em andamento termina em segundo plano.",
-            })
-            job_manager.finish(job.job_id, JobState.CANCELLED)
-        except Exception as exc:
+            }
+
+        def download_error(exc):
             record_exception_event("model_download_error", exc, model_id=spec.id)
-            job_manager.publish(job.job_id, {"type": "error", "message": str(exc)})
-            job_manager.finish(job.job_id, JobState.FAILED, error=str(exc))
+
+        run_blocking_job(
+            job,
+            run_download,
+            cancelled_exceptions=(JobCancelled,),
+            success_event_factory=lambda summary: {"type": "done", "result": summary},
+            cancelled_event_factory=cancelled_event,
+            result_summary_factory=lambda summary: summary,
+            on_exception=download_error,
+        )
 
     threading.Thread(target=worker, daemon=True, name=f"download-{spec.id}").start()
     record_app_event("model_download_started", model_id=spec.id, job_id=job.job_id)
@@ -491,21 +519,14 @@ def ensure_whisper_model_events(model_name: str, cancel_event: Optional[threadin
         return
 
     events: "queue.Queue" = queue.Queue()
-    outcome: Dict[str, Any] = {}
+    outcome = _run_thread_with_outcome(
+        lambda: _download_all_files(spec, emit=events.put, cancel_event=cancel_event),
+        thread_name=f"ensure-{spec.id}",
+        cancel_event=cancel_event,
+        poll_timeout=0.2,
+    )
 
-    def worker():
-        try:
-            _download_all_files(spec, emit=events.put, cancel_event=cancel_event)
-            outcome["ok"] = True
-        except JobCancelled:
-            outcome["cancelled"] = True
-        except Exception as exc:
-            outcome["error"] = exc
-
-    thread = threading.Thread(target=worker, daemon=True, name=f"ensure-{spec.id}")
-    thread.start()
-
-    while thread.is_alive() or not events.empty():
+    while not events.empty():
         try:
             yield events.get(timeout=0.2)
         except queue.Empty:

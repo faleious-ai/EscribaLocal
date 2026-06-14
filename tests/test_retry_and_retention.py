@@ -1,5 +1,6 @@
 import os
 import shutil
+import time
 import pytest
 from services import config_store
 from services.jobs import job_manager, JobState
@@ -80,7 +81,15 @@ def test_prune_retained_inputs_size_limit(tmp_path):
     assert not f1.exists() # O mais antigo foi removido para respeitar o limite
     assert f2.exists()
 
-def test_retry_endpoint_flow(client, tmp_path):
+def test_retry_endpoint_flow(client, tmp_path, monkeypatch):
+    from services import transcriber
+
+    def fake_transcribe_audio_generator(**kwargs):
+        yield {"type": "status", "message": "retry fake"}
+        yield {"type": "done", "full_transcript": []}
+
+    monkeypatch.setattr(transcriber, "transcribe_audio_generator", fake_transcribe_audio_generator)
+
     # Setup de arquivo retido
     from services.input_retention import RETAINED_DIR
     RETAINED_DIR.mkdir(parents=True, exist_ok=True)
@@ -110,6 +119,14 @@ def test_retry_endpoint_flow(client, tmp_path):
     assert data["ok"] is True
     assert "job_id" in data
     assert data["prompt_warning"] is True # Avisa sobre o prompt original omitido
+
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        retry_snapshot = client.get(f"/api/jobs/{data['job_id']}").json()
+        if retry_snapshot["state"] == "completed":
+            break
+        time.sleep(0.05)
+    assert retry_snapshot["state"] == "completed"
 
     # Tenta retry para job inexistente
     assert client.post("/api/jobs/inexistente/retry").status_code == 404

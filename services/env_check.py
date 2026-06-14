@@ -29,7 +29,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from services.app_logging import record_app_event, record_exception_event
-from services.jobs import JobState, job_manager
+from services.job_execution import run_blocking_job
+from services.jobs import job_manager
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 REQUIREMENTS_FILES = (PROJECT_ROOT / "requirements.txt", PROJECT_ROOT / "requirements-dev.txt")
@@ -49,6 +50,18 @@ CHECKS_CACHE_SECONDS = 60.0
 
 _cache_lock = threading.Lock()
 _checks_cache: Dict[str, Any] = {"report": None, "at": 0.0}
+
+
+class PipInstallCancelled(Exception):
+    """Sinaliza cancelamento cooperativo da instalacao."""
+
+
+class PipInstallExitCodeError(Exception):
+    """Sinaliza termino do pip com codigo de erro."""
+
+    def __init__(self, return_code: int):
+        self.return_code = return_code
+        super().__init__(f"pip exit code {return_code}")
 
 
 class InstallValidationError(Exception):
@@ -349,52 +362,83 @@ def start_install_job(packages: List[str], confirm: bool, confirm_hot: bool = Fa
     })
 
     def worker():
-        job_manager.start(job.job_id)
-        process = None
-        try:
+        process_holder: Dict[str, Any] = {"process": None}
+
+        def run_install(publish, cancel_event):
             startupinfo = None
             if os.name == "nt":
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 startupinfo.wShowWindow = subprocess.SW_HIDE
             process = subprocess.Popen(
-                plan["command"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1, startupinfo=startupinfo,
+                plan["command"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                startupinfo=startupinfo,
             )
-            job_manager.publish(job.job_id, {"type": "pip_output", "line": "$ " + plan["command_display"]})
-            for line in process.stdout:
-                if job.cancel_event.is_set():
-                    process.kill()
-                    job_manager.publish(job.job_id, {"type": "cancelled",
-                                                     "message": "Instalação cancelada (pip interrompido)."})
-                    job_manager.finish(job.job_id, JobState.CANCELLED)
-                    return
-                job_manager.publish(job.job_id, {"type": "pip_output", "line": line.rstrip()})
-            return_code = process.wait()
-            if job.cancel_event.is_set():
-                job_manager.finish(job.job_id, JobState.CANCELLED)
-                return
-            invalidate_checks_cache()
-            if return_code == 0:
-                done_message = "Instalação concluída."
-                if plan["requires_restart"]:
-                    done_message += " REINICIE o servidor para os pacotes entrarem em vigor."
-                job_manager.publish(job.job_id, {"type": "done", "message": done_message})
-                job_manager.finish(job.job_id, JobState.COMPLETED,
-                                   result_summary={"requires_restart": plan["requires_restart"]})
-            else:
-                job_manager.publish(job.job_id, {"type": "error",
-                                                 "message": f"pip terminou com código {return_code}."})
-                job_manager.finish(job.job_id, JobState.FAILED, error=f"pip exit code {return_code}")
-        except Exception as exc:
-            if process is not None:
+            process_holder["process"] = process
+            publish({"type": "pip_output", "line": "$ " + plan["command_display"]})
+            try:
+                for line in process.stdout:
+                    if cancel_event.is_set():
+                        process.kill()
+                        raise PipInstallCancelled()
+                    publish({"type": "pip_output", "line": line.rstrip()})
+                return_code = process.wait()
+            except Exception:
                 try:
                     process.kill()
                 except OSError:
                     pass
+                raise
+
+            if cancel_event.is_set():
+                raise PipInstallCancelled()
+            invalidate_checks_cache()
+            if return_code != 0:
+                raise PipInstallExitCodeError(return_code)
+            return {"requires_restart": plan["requires_restart"]}
+
+        def install_done(summary):
+            done_message = "Instalação concluída."
+            if summary["requires_restart"]:
+                done_message += " REINICIE o servidor para os pacotes entrarem em vigor."
+            return {"type": "done", "message": done_message}
+
+        def install_cancelled(_exc):
+            return {"type": "cancelled", "message": "Instalação cancelada (pip interrompido)."}
+
+        def install_error(exc):
             record_exception_event("pip_install_error", exc, packages=plan["packages"])
-            job_manager.publish(job.job_id, {"type": "error", "message": str(exc)})
-            job_manager.finish(job.job_id, JobState.FAILED, error=str(exc))
+
+        def install_error_event(exc):
+            if isinstance(exc, PipInstallExitCodeError):
+                return {"type": "error", "message": f"pip terminou com código {exc.return_code}."}
+            return {"type": "error", "message": str(exc)}
+
+        def before_finish(_job, final_state, _error_message):
+            process = process_holder.get("process")
+            if process is None:
+                return
+            if final_state.value == "cancelled" and process.poll() is None:
+                try:
+                    process.kill()
+                except OSError:
+                    pass
+
+        run_blocking_job(
+            job,
+            run_install,
+            cancelled_exceptions=(PipInstallCancelled,),
+            success_event_factory=install_done,
+            cancelled_event_factory=install_cancelled,
+            error_event_factory=install_error_event,
+            result_summary_factory=lambda summary: summary,
+            on_exception=install_error,
+            before_finish=before_finish,
+        )
 
     threading.Thread(target=worker, daemon=True, name="pip-install").start()
     record_app_event("pip_install_started", job_id=job.job_id, packages=plan["packages"],

@@ -40,7 +40,8 @@ from services.transcriber import (
 from services.vibevoice_service import transcribe_vibevoice_generator
 from services.vibevoice_tts_1_5b import SUPPORTED_LONGFORM_TTS_MODELS, generate_voice_1_5b_with_metadata
 from services.vibevoice_realtime_0_5b import generate_voice_realtime_wav_with_metadata, generate_voice_stream_0_5b
-from services.jobs import JobState, job_manager
+from services.job_execution import run_sync_generator_job
+from services.jobs import job_manager
 from services.parameters_registry import validate_params
 from routers.jobs_routes import router as jobs_router
 from routers.models_routes import router as models_router
@@ -215,23 +216,21 @@ async def client_log(request: Request):
     return {"ok": True}
 
 def _transcription_sse_response(request: Request, job, make_generator, engine: str, model_label: str, temp_file_path: str):
-    """Envolve um gerador síncrono de transcrição num StreamingResponse SSE com job.
+    """Envolve um gerador sincrono de transcricao num StreamingResponse SSE com job.
 
     Responsabilidades: evento inicial {"type":"job"} (ignorado por clientes
-    antigos), fila de GPU (semáforo único — duas inferências pesadas
-    simultâneas estouram 6GB de VRAM), cancelamento por desconexão do cliente
-    e persistência do estado final no histórico.
+    antigos), fila de GPU, cancelamento por desconexao do cliente e
+    persistencia do estado final no historico.
     """
 
     async def sse_stream():
-        loop = asyncio.get_running_loop()
         yield f"data: {json.dumps({'type': 'job', 'job_id': job.job_id})}\n\n"
 
         stop_watcher = asyncio.Event()
 
         async def watch_disconnect():
-            # Rede de segurança: aborto do fetch/fechamento da aba cancela o
-            # job mesmo com o worker bloqueado numa inferência longa.
+            # Rede de seguranca: aborto do fetch/fechamento da aba cancela o
+            # job mesmo com o worker bloqueado numa inferencia longa.
             while not stop_watcher.is_set():
                 if await request.is_disconnected():
                     job_manager.cancel(job.job_id, reason="cliente desconectou")
@@ -242,97 +241,58 @@ def _transcription_sse_response(request: Request, job, make_generator, engine: s
                     continue
 
         watcher = asyncio.create_task(watch_disconnect())
-        final_state = None
-        error_message = None
-        gpu_acquired = False
-        try:
-            queued_notified = False
-            while not job.cancel_event.is_set():
-                gpu_acquired = await loop.run_in_executor(None, job_manager.try_acquire_gpu, job.job_id, 0.5)
-                if gpu_acquired:
-                    break
-                if not queued_notified:
-                    queued_notified = True
-                    waiting_event = {"type": "status", "message": "Na fila: aguardando outra tarefa pesada terminar..."}
-                    job_manager.publish(job.job_id, waiting_event)
-                    yield f"data: {json.dumps(waiting_event)}\n\n"
 
-            if job.cancel_event.is_set():
-                final_state = JobState.CANCELLED
-                yield f"data: {json.dumps({'type': 'cancelled', 'message': 'Tarefa cancelada antes do início.'})}\n\n"
-                return
+        def record_transcription_event(chunk):
+            chunk_type = chunk.get("type")
+            if chunk_type == "model_status":
+                record_app_event("transcription_model_status", engine=engine, **chunk)
+            elif chunk_type == "done":
+                record_app_event(
+                    "transcription_completed",
+                    engine=engine,
+                    model=model_label,
+                    segment_count=len(chunk.get("full_transcript", [])),
+                )
+            elif chunk_type == "error":
+                record_app_event("transcription_stream_error", engine=engine, message=chunk.get("message"))
+            elif chunk_type == "cancelled":
+                record_app_event("transcription_cancelled", engine=engine, model=model_label)
 
-            job_manager.start(job.job_id)
-            sync_generator = make_generator(job.cancel_event)
-
-            while True:
-                chunk = await loop.run_in_executor(None, lambda: next(sync_generator, None))
-                if chunk is None:
-                    break
-                chunk_type = chunk.get("type")
-                job_manager.publish(job.job_id, chunk)
-
-                if chunk_type == "model_status":
-                    record_app_event("transcription_model_status", engine=engine, **chunk)
-                elif chunk_type == "done":
-                    final_state = JobState.COMPLETED
-                    record_app_event(
-                        "transcription_completed",
-                        engine=engine,
-                        model=model_label,
-                        segment_count=len(chunk.get("full_transcript", [])),
-                    )
-                elif chunk_type == "error":
-                    final_state = JobState.FAILED
-                    error_message = chunk.get("message")
-                    record_app_event("transcription_stream_error", engine=engine, message=chunk.get("message"))
-                elif chunk_type == "cancelled":
-                    final_state = JobState.CANCELLED
-                    record_app_event("transcription_cancelled", engine=engine, model=model_label)
-
-                yield f"data: {json.dumps(chunk)}\n\n"
-
-                if chunk_type == "cancelled":
-                    break
-                await asyncio.sleep(0.01)
-
-        except Exception as err:
-            final_state = JobState.FAILED
-            error_message = str(err)
+        def record_transcription_exception(err):
             logger.error(f"Erro no streaming SSE {engine}: {err}", exc_info=True)
             record_exception_event("transcription_stream_exception", err, engine=engine, model=model_label)
-            yield f"data: {json.dumps({'type': 'error', 'message': str(err)})}\n\n"
+
+        def retain_input_before_finish(current_job, _final_state, _error_message):
+            # Executa retencao do arquivo fisico antes de persistir o estado final.
+            from services.input_retention import retain_input_file
+            retained_path = retain_input_file(current_job.job_id, temp_file_path)
+            if retained_path:
+                current_job.input_ref = retained_path
+
+        try:
+            async for chunk in run_sync_generator_job(
+                job,
+                make_generator,
+                on_event=record_transcription_event,
+                on_exception=record_transcription_exception,
+                before_finish=retain_input_before_finish,
+            ):
+                yield f"data: {json.dumps(chunk)}\n\n"
         finally:
             stop_watcher.set()
             watcher.cancel()
-            if gpu_acquired:
-                job_manager.release_gpu(job.job_id)
-            if final_state is None:
-                # Stream fechado sem desfecho (desconexão do cliente): garante
-                # a parada do worker e registra como cancelado.
-                job.cancel_event.set()
-                final_state = JobState.CANCELLED
-            
-            # Executa retenção do arquivo físico (antes de persistir o final_state para atualizar input_ref)
-            from services.input_retention import retain_input_file
-            retained_path = retain_input_file(job.job_id, temp_file_path)
-            if retained_path:
-                job.input_ref = retained_path
-
-            job_manager.finish(job.job_id, final_state, error=error_message)
             if temp_file_path and os.path.isfile(temp_file_path):
                 try:
                     os.remove(temp_file_path)
-                    logger.info(f"Arquivo temporário removido: {temp_file_path}")
+                    logger.info(f"Arquivo temporario removido: {temp_file_path}")
                 except Exception as cleanup_err:
-                    logger.warning(f"Não foi possível remover o arquivo temporário: {cleanup_err}")
+                    logger.warning(f"Nao foi possivel remover o arquivo temporario: {cleanup_err}")
 
     return StreamingResponse(
         sse_stream(),
         media_type="text/event-stream",
         headers={"X-Escriba-Job-ID": job.job_id},
     )
-
 
 @app.post("/api/transcribe")
 async def transcribe_audio(
