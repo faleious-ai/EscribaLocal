@@ -52,7 +52,7 @@ if %errorlevel% equ 0 (
 )
 
 echo [4/4] Inicializando o servidor FastAPI...
-start "" /b cmd /c "powershell -Command \"while ($true) { $c = New-Object System.Net.Sockets.TcpClient; try { $c.Connect('127.0.0.1', 8000); $c.Close(); break } catch {} Start-Sleep -Milliseconds 500 }\" && start http://127.0.0.1:8000"
+start "" /b cmd /c "powershell -Command \"while ($true) { try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8000/' -UseBasicParsing -TimeoutSec 1; if ($r.StatusCode -eq 200) { break } } catch {} Start-Sleep -Milliseconds 400 }\" && start http://127.0.0.1:8000"
 
 echo =======================================================================
 echo Servidor rodando em http://127.0.0.1:8000
