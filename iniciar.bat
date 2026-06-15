@@ -51,8 +51,8 @@ if %errorlevel% equ 0 (
     python -m pip install -r requirements.txt
 )
 
-echo [4/4] Inicializando o servidor FastAPI e abrindo o navegador...
-start "" "http://127.0.0.1:8000"
+echo [4/4] Inicializando o servidor FastAPI...
+start "" /b cmd /c "powershell -Command \"while ($true) { $c = New-Object System.Net.Sockets.TcpClient; try { $c.Connect('127.0.0.1', 8000); $c.Close(); break } catch {} Start-Sleep -Milliseconds 500 }\" && start http://127.0.0.1:8000"
 
 echo =======================================================================
 echo Servidor rodando em http://127.0.0.1:8000
