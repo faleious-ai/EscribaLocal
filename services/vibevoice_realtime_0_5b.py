@@ -175,17 +175,39 @@ def _invoke_realtime_worker(request: Dict[str, Any]) -> Dict[str, Any]:
         )
         raise RealtimeUnavailableError(f"VibeVoice Realtime 0.5B indisponivel: {message}")
 
-    record_app_event(
-        "tts_realtime_worker_completed",
-        requested_model="realtime_0_5b",
-        worker_op=request.get("op"),
-        worker_transport=(payload.get("worker") or {}).get("transport", "subprocess"),
-        worker_protocol_version=(payload.get("worker") or {}).get("protocol_version"),
-        request_id=request.get("request_id"),
-        worker_status=(payload.get("worker") or {}).get("status"),
-        worker_native_probe_status=((payload.get("worker") or {}).get("native_probe") or {}).get("status"),
-        duration_ms=round((time.perf_counter() - started) * 1000, 1),
-    )
+    native_probe = (payload.get("worker") or {}).get("native_probe") or {}
+    deep_probe = native_probe.get("deep_probe") or {}
+    breakdown = deep_probe.get("breakdown") or {}
+
+    telemetry_fields = {
+        "requested_model": "realtime_0_5b",
+        "worker_op": request.get("op"),
+        "worker_transport": (payload.get("worker") or {}).get("transport", "subprocess"),
+        "worker_protocol_version": (payload.get("worker") or {}).get("protocol_version"),
+        "request_id": request.get("request_id"),
+        "worker_status": (payload.get("worker") or {}).get("status"),
+        "worker_native_probe_status": native_probe.get("status"),
+        "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+    }
+
+    if deep_probe:
+        telemetry_fields.update({
+            "deep_probe_enabled": True,
+            "deep_probe_failed_step": deep_probe.get("failed_step"),
+            "deep_probe_error_type": deep_probe.get("error_type"),
+            "deep_probe_imports_ok": breakdown.get("imports_ok"),
+            "deep_probe_config_ok": breakdown.get("config_ok"),
+            "deep_probe_processor_ok": breakdown.get("processor_ok"),
+            "deep_probe_tokenizer_ok": breakdown.get("tokenizer_ok"),
+            "deep_probe_feature_extractor_ok": breakdown.get("feature_extractor_ok"),
+            "deep_probe_model_class_ok": breakdown.get("model_class_ok"),
+        })
+        if native_probe.get("model_class_name"):
+            telemetry_fields["model_class_name"] = native_probe.get("model_class_name")
+    else:
+        telemetry_fields["deep_probe_enabled"] = False
+
+    record_app_event("tts_realtime_worker_completed", **telemetry_fields)
     return payload
 
 

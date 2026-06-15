@@ -415,8 +415,13 @@ def test_worker_probe_loads_processor_when_deep_probe_enabled(monkeypatch):
 
     class FakeConfig:
         model_type = "vibevoice_streaming"
+        auto_map = {}
 
     class FakeProcessor:
+        tokenizer = object()
+        feature_extractor = object()
+
+    class FakeModel:
         pass
 
     monkeypatch.setitem(sys.modules, "transformers", type("FakeTransformers", (), {
@@ -425,6 +430,11 @@ def test_worker_probe_loads_processor_when_deep_probe_enabled(monkeypatch):
         }),
         "AutoProcessor": type("AutoProcessor", (), {
             "from_pretrained": staticmethod(lambda *args, **kwargs: FakeProcessor()),
+        }),
+        "AutoTokenizer": type("AutoTokenizer", (), {}),
+        "AutoFeatureExtractor": type("AutoFeatureExtractor", (), {}),
+        "AutoModel": type("AutoModel", (), {
+            "_model_mapping": {FakeConfig: FakeModel}
         }),
     })())
 
@@ -502,3 +512,178 @@ def test_realtime_worker_client_records_basic_telemetry(monkeypatch):
     assert events[1][0] == "tts_realtime_worker_completed"
     assert events[1][1]["worker_native_probe_status"] == "disabled"
     assert isinstance(events[1][1]["duration_ms"], float)
+
+
+def test_worker_probe_returns_breakdown_on_success(monkeypatch):
+    import workers.vibevoice_realtime_worker as worker
+
+    monkeypatch.setenv("ESCRIBA_REALTIME_NATIVE_ENABLE", "1")
+    monkeypatch.setenv("ESCRIBA_REALTIME_DEEP_PROBE_ENABLE", "1")
+
+    class FakeConfig:
+        model_type = "vibevoice_streaming"
+        auto_map = {"AutoModel": "modeling_vibevoice_realtime.VibeVoiceRealtimeModel"}
+
+    class FakeProcessor:
+        tokenizer = object()
+        feature_extractor = object()
+
+    class FakeModelClass:
+        pass
+
+    monkeypatch.setitem(sys.modules, "transformers", type("FakeTransformers", (), {
+        "AutoConfig": type("AutoConfig", (), {
+            "from_pretrained": staticmethod(lambda *args, **kwargs: FakeConfig()),
+        }),
+        "AutoProcessor": type("AutoProcessor", (), {
+            "from_pretrained": staticmethod(lambda *args, **kwargs: FakeProcessor()),
+        }),
+        "AutoTokenizer": type("AutoTokenizer", (), {}),
+        "AutoFeatureExtractor": type("AutoFeatureExtractor", (), {}),
+        "AutoModel": type("AutoModel", (), {}),
+    })())
+
+    monkeypatch.setitem(sys.modules, "transformers.models.auto.dynamic_module_utils", type("FakeDynamicUtils", (), {
+        "get_class_from_dynamic_module": staticmethod(lambda *args, **kwargs: FakeModelClass),
+    })())
+
+    runtime_patches = type("RuntimePatches", (), {"apply_runtime_patches": staticmethod(lambda: None)})()
+    transformers_loader = type("TransformersLoader", (), {"use_standard_transformers": staticmethod(lambda: type("DummyCtx", (), {"__enter__": lambda s: None, "__exit__": lambda s, *a: False})())})()
+    monkeypatch.setitem(sys.modules, "services.runtime_patches", runtime_patches)
+    monkeypatch.setitem(sys.modules, "services.transformers_loader", transformers_loader)
+
+    probe = worker._probe_native_stack({
+        "installed": True,
+        "path": "C:/fake/model",
+        "status": "installed",
+    })
+
+    assert probe["ok"] is True
+    assert probe["status"] == "processor-loaded"
+    assert probe["deep_probe_enabled"] is True
+    assert probe["model_class_name"] == "FakeModelClass"
+
+    breakdown = probe["deep_probe"]["breakdown"]
+    assert breakdown["imports_ok"] is True
+    assert breakdown["config_ok"] is True
+    assert breakdown["processor_ok"] is True
+    assert breakdown["tokenizer_ok"] is True
+    assert breakdown["feature_extractor_ok"] is True
+    assert breakdown["model_class_ok"] is True
+    assert probe["deep_probe"]["failed_step"] is None
+
+
+def test_worker_probe_returns_breakdown_on_partial_failure(monkeypatch):
+    import workers.vibevoice_realtime_worker as worker
+
+    monkeypatch.setenv("ESCRIBA_REALTIME_NATIVE_ENABLE", "1")
+    monkeypatch.setenv("ESCRIBA_REALTIME_DEEP_PROBE_ENABLE", "1")
+
+    class FakeConfig:
+        model_type = "vibevoice_streaming"
+        auto_map = {}
+
+    class FakeProcessor:
+        tokenizer = None
+        feature_extractor = object()
+
+    class BadTokenizer:
+        @staticmethod
+        def from_pretrained(*args, **kwargs):
+            raise ValueError("Falha simulada no carregamento do tokenizer")
+
+    monkeypatch.setitem(sys.modules, "transformers", type("FakeTransformers", (), {
+        "AutoConfig": type("AutoConfig", (), {
+            "from_pretrained": staticmethod(lambda *args, **kwargs: FakeConfig()),
+        }),
+        "AutoProcessor": type("AutoProcessor", (), {
+            "from_pretrained": staticmethod(lambda *args, **kwargs: FakeProcessor()),
+        }),
+        "AutoTokenizer": BadTokenizer,
+        "AutoFeatureExtractor": type("AutoFeatureExtractor", (), {}),
+        "AutoModel": type("AutoModel", (), {}),
+    })())
+
+    runtime_patches = type("RuntimePatches", (), {"apply_runtime_patches": staticmethod(lambda: None)})()
+    transformers_loader = type("TransformersLoader", (), {"use_standard_transformers": staticmethod(lambda: type("DummyCtx", (), {"__enter__": lambda s: None, "__exit__": lambda s, *a: False})())})()
+    monkeypatch.setitem(sys.modules, "services.runtime_patches", runtime_patches)
+    monkeypatch.setitem(sys.modules, "services.transformers_loader", transformers_loader)
+
+    probe = worker._probe_native_stack({
+        "installed": True,
+        "path": "C:/fake/model",
+        "status": "installed",
+    })
+
+    assert probe["ok"] is False
+    assert probe["status"] == "tokenizer-load-failed"
+    assert probe["reason"] == "tokenizer_load_failed"
+    assert probe["deep_probe_enabled"] is True
+
+    breakdown = probe["deep_probe"]["breakdown"]
+    assert breakdown["imports_ok"] is True
+    assert breakdown["config_ok"] is True
+    assert breakdown["processor_ok"] is True
+    assert breakdown["tokenizer_ok"] is False
+    assert breakdown["feature_extractor_ok"] is False
+    assert breakdown["model_class_ok"] is False
+    assert probe["deep_probe"]["failed_step"] == "tokenizer"
+    assert probe["deep_probe"]["error_type"] == "ValueError"
+    assert "Falha simulada" in probe["deep_probe"]["message"]
+
+
+def test_realtime_worker_telemetry_captures_deep_probe_breakdown(monkeypatch):
+    from services import vibevoice_realtime_0_5b as realtime
+
+    events = []
+
+    class FakeCompleted:
+        returncode = 0
+        stdout = json.dumps({
+            "ok": True,
+            "worker": {
+                "transport": "subprocess",
+                "protocol_version": 1,
+                "status": "healthy",
+                "native_probe": {
+                    "ok": True,
+                    "status": "processor-loaded",
+                    "reason": "processor_loaded",
+                    "model_class_name": "VibeVoiceRealtimeModel",
+                    "deep_probe_enabled": True,
+                    "deep_probe": {
+                        "failed_step": None,
+                        "error_type": None,
+                        "message": None,
+                        "breakdown": {
+                            "imports_ok": True,
+                            "config_ok": True,
+                            "processor_ok": True,
+                            "tokenizer_ok": True,
+                            "feature_extractor_ok": True,
+                            "model_class_ok": True,
+                        }
+                    }
+                },
+            },
+        })
+        stderr = ""
+
+    monkeypatch.setattr(realtime, "record_app_event", lambda event_type, **fields: events.append((event_type, fields)))
+    monkeypatch.setattr(realtime, "_resolve_worker_command", lambda: ["fake-worker"])
+    monkeypatch.setattr(realtime.subprocess, "run", lambda *args, **kwargs: FakeCompleted())
+
+    realtime.get_realtime_worker_status()
+
+    completed_event = next(evt for evt in events if evt[0] == "tts_realtime_worker_completed")
+    fields = completed_event[1]
+
+    assert fields["deep_probe_enabled"] is True
+    assert fields["deep_probe_failed_step"] is None
+    assert fields["deep_probe_imports_ok"] is True
+    assert fields["deep_probe_config_ok"] is True
+    assert fields["deep_probe_processor_ok"] is True
+    assert fields["deep_probe_tokenizer_ok"] is True
+    assert fields["deep_probe_feature_extractor_ok"] is True
+    assert fields["deep_probe_model_class_ok"] is True
+    assert fields["model_class_name"] == "VibeVoiceRealtimeModel"

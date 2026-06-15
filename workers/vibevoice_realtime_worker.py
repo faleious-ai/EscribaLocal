@@ -96,16 +96,52 @@ def _probe_native_stack(model_status: Dict[str, Any]) -> Dict[str, Any]:
             "message": str(exc),
         }
 
+    breakdown = {
+        "imports_ok": False,
+        "config_ok": False,
+        "processor_ok": False,
+        "tokenizer_ok": False,
+        "feature_extractor_ok": False,
+        "model_class_ok": False,
+    }
+
+    failed_step = None
+    error_type = None
+    error_message = None
+    config = None
+    processor = None
+    model_class_name = None
+
     try:
         apply_runtime_patches()
         with use_standard_transformers():
-            from transformers import AutoConfig, AutoProcessor
+            try:
+                from transformers import (
+                    AutoConfig,
+                    AutoProcessor,
+                    AutoTokenizer,
+                    AutoFeatureExtractor,
+                    AutoModel,
+                )
+                breakdown["imports_ok"] = True
+            except Exception as exc:
+                failed_step = "imports"
+                error_type = exc.__class__.__name__
+                error_message = str(exc)
+                raise exc
 
-            config = AutoConfig.from_pretrained(
-                model_status["path"],
-                local_files_only=True,
-                trust_remote_code=True,
-            )
+            try:
+                config = AutoConfig.from_pretrained(
+                    model_status["path"],
+                    local_files_only=True,
+                    trust_remote_code=True,
+                )
+                breakdown["config_ok"] = True
+            except Exception as exc:
+                failed_step = "config"
+                error_type = exc.__class__.__name__
+                error_message = str(exc)
+                raise exc
 
             if not _deep_probe_enabled():
                 return {
@@ -123,26 +159,113 @@ def _probe_native_stack(model_status: Dict[str, Any]) -> Dict[str, Any]:
                     local_files_only=True,
                     trust_remote_code=True,
                 )
+                breakdown["processor_ok"] = True
             except Exception as exc:
-                return {
-                    "ok": False,
-                    "status": "processor-load-failed",
-                    "reason": "processor_not_ready",
-                    "error_type": exc.__class__.__name__,
-                    "message": str(exc),
-                    "model_type": getattr(config, "model_type", None),
-                    "deep_probe_enabled": True,
-                    "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-                }
+                failed_step = "processor"
+                error_type = exc.__class__.__name__
+                error_message = str(exc)
+                raise exc
 
-    except Exception as exc:
+            try:
+                tokenizer = None
+                if hasattr(processor, "tokenizer") and processor.tokenizer is not None:
+                    tokenizer = processor.tokenizer
+                else:
+                    tokenizer = AutoTokenizer.from_pretrained(
+                        model_status["path"],
+                        local_files_only=True,
+                        trust_remote_code=True,
+                    )
+                if tokenizer is not None:
+                    breakdown["tokenizer_ok"] = True
+                else:
+                    raise RuntimeError("Nao foi possivel instanciar o tokenizer.")
+            except Exception as exc:
+                failed_step = "tokenizer"
+                error_type = exc.__class__.__name__
+                error_message = str(exc)
+                raise exc
+
+            try:
+                feature_extractor = None
+                if hasattr(processor, "feature_extractor") and processor.feature_extractor is not None:
+                    feature_extractor = processor.feature_extractor
+                else:
+                    feature_extractor = AutoFeatureExtractor.from_pretrained(
+                        model_status["path"],
+                        local_files_only=True,
+                        trust_remote_code=True,
+                    )
+                if feature_extractor is not None:
+                    breakdown["feature_extractor_ok"] = True
+                else:
+                    raise RuntimeError("Nao foi possivel instanciar o feature extractor.")
+            except Exception as exc:
+                failed_step = "feature_extractor"
+                error_type = exc.__class__.__name__
+                error_message = str(exc)
+                raise exc
+
+            try:
+                model_class = None
+                auto_map = getattr(config, "auto_map", {})
+                if auto_map:
+                    for auto_cls_name, class_ref in auto_map.items():
+                        from transformers.models.auto.dynamic_module_utils import get_class_from_dynamic_module
+                        model_class = get_class_from_dynamic_module(
+                            class_ref,
+                            model_status["path"],
+                        )
+                        if model_class is not None:
+                            break
+                else:
+                    model_class = AutoModel._model_mapping.get(config.__class__, None)
+
+                if model_class is not None:
+                    breakdown["model_class_ok"] = True
+                    model_class_name = model_class.__name__
+                else:
+                    raise RuntimeError("Classe de modelagem correspondente nao encontrada.")
+            except Exception as exc:
+                failed_step = "model_class"
+                error_type = exc.__class__.__name__
+                error_message = str(exc)
+                raise exc
+
+    except Exception:
+        status_map = {
+            "imports": "config-load-failed",
+            "config": "config-load-failed",
+            "processor": "processor-load-failed",
+            "tokenizer": "tokenizer-load-failed",
+            "feature_extractor": "feature-extractor-load-failed",
+            "model_class": "model-class-load-failed",
+        }
+        status = status_map.get(failed_step, "config-load-failed")
+        reason_map = {
+            "imports": "imports_failed",
+            "config": "config_load_failed",
+            "processor": "processor_load_failed",
+            "tokenizer": "tokenizer_load_failed",
+            "feature_extractor": "feature_extractor_load_failed",
+            "model_class": "model_class_resolution_failed",
+        }
+        reason = reason_map.get(failed_step, "native_stack_not_ready")
+
         return {
             "ok": False,
-            "status": "config-load-failed",
-            "reason": "native_stack_not_ready",
-            "error_type": exc.__class__.__name__,
-            "message": str(exc),
-            "deep_probe_enabled": _deep_probe_enabled(),
+            "status": status,
+            "reason": reason,
+            "error_type": error_type,
+            "message": error_message,
+            "deep_probe_enabled": True,
+            "deep_probe": {
+                "breakdown": breakdown,
+                "failed_step": failed_step,
+                "error_type": error_type,
+                "message": error_message,
+            },
+            "model_type": getattr(config, "model_type", None) if config else None,
             "duration_ms": round((time.perf_counter() - started) * 1000, 1),
         }
 
@@ -152,7 +275,14 @@ def _probe_native_stack(model_status: Dict[str, Any]) -> Dict[str, Any]:
         "reason": "processor_loaded",
         "model_type": getattr(config, "model_type", None),
         "processor_class": processor.__class__.__name__,
+        "model_class_name": model_class_name,
         "deep_probe_enabled": True,
+        "deep_probe": {
+            "breakdown": breakdown,
+            "failed_step": None,
+            "error_type": None,
+            "message": None,
+        },
         "duration_ms": round((time.perf_counter() - started) * 1000, 1),
     }
 
