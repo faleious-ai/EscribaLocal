@@ -2082,8 +2082,8 @@ const helpTopics = {
             <p>Selecione o motor neural para geração de voz:</p>
             <ul>
                 <li><strong>VibeVoice-TTS-1.5B:</strong> modelo oficial de longa duração listado na coleção da Microsoft. É a opção padrão para textos longos e diálogos multi-falante.</li>
-                <li><strong>VibeVoice-Large:</strong> variante maior disponível em aoi-ot/VibeVoice-Large. É mais pesada, tem cerca de 18,7 GB e exige a biblioteca local VibeVoice para inferência.</li>
-                <li><strong>VibeVoice-Realtime-0.5B:</strong> modelo de um falante voltado a baixa latência e respostas curtas. A aba de chat usa este modo automaticamente.</li>
+                <li><strong>VibeVoice-Large:</strong> variante maior disponível em aoi-ot/VibeVoice-Large. Pode aparecer como nao instalado, dependencia ausente, hardware insuficiente ou erro de carga; em 6GB nao e recomendado e exige estrategia explicita antes da inferencia.</li>
+                <li><strong>VibeVoice-Realtime-0.5B:</strong> indisponivel nesta versao: o checkpoint usa model_type vibevoice_streaming e exige adapter nativo compativel.</li>
             </ul>
         `
     },

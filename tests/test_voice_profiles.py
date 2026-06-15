@@ -100,13 +100,12 @@ def test_reference_is_mono_24khz(client, fake_builder):
 
 # ------------------------------------------------------- listagem/persistência
 
-def test_list_presets_and_custom(client, fake_builder):
+def test_list_only_custom_real_voices(client, fake_builder):
     _upload(client, name="Voz A")
     _upload(client, name="Voz B")
     data = client.get("/api/tts/voices").json()
 
-    assert len(data["presets"]) == 4
-    assert all(p["name"].startswith("Preset local — voz Windows") for p in data["presets"])
+    assert data["presets"] == []
     assert sorted(v["name"] for v in data["custom"]) == ["Voz A", "Voz B"]
     assert data["total_disk_bytes"] > 0
 
@@ -255,9 +254,15 @@ def test_speaker_voice_mapping_distinct(client, fake_builder):
     )
     assert mapping == {"1": voice_a["id"], "2": voice_b["id"]}
 
-    # Legado sem biblioteca: cada speaker N cai no preset N (vozes distintas).
-    legacy = _resolve_speaker_voice_map(["1", "2"], "speaker_1", None, None)
-    assert legacy == {"1": "preset_windows_1", "2": "preset_windows_2"}
+    # Sem mapeamento e sem voz padrão real, a geração falha em vez de cair para
+    # presets Windows.
+    from services.vibevoice_tts_1_5b import VoiceUnavailableError
+    with pytest.raises(VoiceUnavailableError):
+        _resolve_speaker_voice_map(["1", "2"], "speaker_1", None, None)
+
+    client.post(f"/api/tts/voices/{voice_a['id']}/set-default")
+    default_mapping = _resolve_speaker_voice_map(["1", "2"], "speaker_1", None, None)
+    assert default_mapping == {"1": voice_a["id"], "2": voice_a["id"]}
 
 
 def test_generate_endpoint_passes_real_params(client, main_module, monkeypatch):
@@ -272,7 +277,7 @@ def test_generate_endpoint_passes_real_params(client, main_module, monkeypatch):
     response = client.post("/api/tts/generate", data={
         "text": "Olá.", "tts_model": "tts_1_5b",
         "voice_id": "11111111-2222-3333-4444-555555555555",
-        "speaker_voices": json.dumps({"1": "preset_windows_2"}),
+        "speaker_voices": json.dumps({"1": "22222222-3333-4444-5555-666666666666"}),
         "cfg_scale": "2.2", "n_diffusion_steps": "14", "max_frames": "300",
         "seed": "7", "failure_policy": "fail", "device": "cpu",
     })
@@ -284,15 +289,17 @@ def test_generate_endpoint_passes_real_params(client, main_module, monkeypatch):
     assert captured["failure_policy"] == "fail"
     assert captured["device"] == "cpu"
     assert captured["voice_id"] == "11111111-2222-3333-4444-555555555555"
-    assert captured["speaker_voices"] == {"1": "preset_windows_2"}
+    assert captured["speaker_voices"] == {"1": "22222222-3333-4444-5555-666666666666"}
 
 
 def test_realtime_model_blocked(client):
     response = client.post("/api/tts/generate", data={
         "text": "Olá.", "tts_model": "realtime_0_5b",
     })
-    assert response.status_code == 400
-    assert "indisponível" in response.json()["detail"]
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert detail["code"] == "tts_realtime_unavailable"
+    assert "worker isolado" in detail["message"].lower()
 
 
 # ------------------------------------------------------------ export/import

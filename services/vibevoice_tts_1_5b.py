@@ -2,6 +2,7 @@ import sys
 import os
 import gc
 import io
+import importlib.util
 import logging
 import re
 import tempfile
@@ -17,7 +18,6 @@ apply_runtime_patches()
 from services.transformers_loader import apply_vibevoice_fork_patches, use_custom_transformers
 
 with use_custom_transformers():
-    from transformers import pipeline, AutoConfig, AutoModelForTextToWaveform
     apply_vibevoice_fork_patches()
 
 
@@ -39,7 +39,7 @@ SUPPORTED_LONGFORM_TTS_MODELS = set(TTS_MODEL_IDS)
 # custom_transformers só carrega o formato CONVERTIDO (pesos renomeados +
 # config reestruturado). A conversão é local e única por máquina
 # (scripts/convert_vibevoice_1_5b.py); sem ela, tokenizers de áudio e
-# diffusion head ficam com pesos aleatórios e o TTS cai no SAPI5.
+# diffusion head ficam com pesos aleatórios e o TTS deve falhar com erro claro.
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONVERTED_MODEL_DIRS = {
     "tts_1_5b": os.path.join(_PROJECT_ROOT, "models", "VibeVoice-1.5B-hf"),
@@ -66,10 +66,12 @@ _voice_embeds_cache: Dict[str, Any] = {}          # f"{model_key}:{speaker_id}" 
 _direct_processors: Dict[str, Any] = {}
 _direct_models: Dict[str, Any] = {}
 
+LARGE_MIN_VRAM_MB = 19000
+
 
 def _resolve_tts_source(model_key: str) -> str:
-    """Pasta convertida local quando existe; senão o repo (que falhará com
-    aviso claro no log, caindo no fallback SAPI5)."""
+    """Pasta convertida local quando existe; senão o repo, que deve falhar
+    com aviso claro no log."""
     converted_dir = CONVERTED_MODEL_DIRS.get(model_key)
     if converted_dir and os.path.isdir(converted_dir):
         return converted_dir
@@ -196,6 +198,43 @@ class VoiceUnavailableError(RuntimeError):
     """Voz escolhida ausente/corrompida — NUNCA cair silenciosamente em outra."""
 
 
+class LargeModelUnavailableError(RuntimeError):
+    """VibeVoice-Large não deve cair em fallback nem tentar carga cega."""
+
+
+def _cuda_total_vram_mb() -> Optional[float]:
+    try:
+        if not torch.cuda.is_available():
+            return None
+        return float(torch.cuda.get_device_properties(0).total_memory) / 1e6
+    except Exception as exc:
+        logger.debug("Falha ao detectar VRAM total para VibeVoice-Large: %s", exc)
+        return None
+
+
+def _preflight_direct_vibevoice_model(model_key: str) -> None:
+    if model_key != "tts_large":
+        return
+    if importlib.util.find_spec("vibevoice") is None:
+        raise LargeModelUnavailableError(
+            "VibeVoice-Large indisponivel: dependencia upstream 'vibevoice' ausente. "
+            "Instale a biblioteca VibeVoice em ambiente local compativel ou use o VibeVoice-1.5B."
+        )
+
+    total_vram_mb = _cuda_total_vram_mb()
+    if total_vram_mb is None:
+        raise LargeModelUnavailableError(
+            "VibeVoice-Large indisponivel: hardware insuficiente ou GPU CUDA nao detectada. "
+            "O Large exige estrategia explicita de GPU/offload antes de qualquer carga."
+        )
+    if total_vram_mb < LARGE_MIN_VRAM_MB:
+        raise LargeModelUnavailableError(
+            f"VibeVoice-Large indisponivel: hardware insuficiente para este perfil "
+            f"({total_vram_mb / 1000:.1f}GB detectados; ~{LARGE_MIN_VRAM_MB / 1000:.0f}GB recomendados). "
+            "Nao recomendado para 6GB; defina uma estrategia explicita de hardware/offload antes de usar."
+        )
+
+
 def _embeds_from_waveform(entry: Dict[str, Any], waveform: "np.ndarray"):
     model, processor, device = entry["model"], entry["processor"], entry["device"]
     features = processor.feature_extractor(
@@ -309,9 +348,9 @@ def _get_direct_vibevoice_model(model_key: str):
         )
         from vibevoice.processor.vibevoice_processor import VibeVoiceProcessor
     except Exception as exc:
-        raise RuntimeError(
-            "O VibeVoice-Large usa a biblioteca upstream 'vibevoice'. "
-            "Instale-a em um ambiente local compativel ou use o VibeVoice-1.5B/Realtime-0.5B."
+        raise LargeModelUnavailableError(
+            "VibeVoice-Large indisponivel: dependencia upstream 'vibevoice' incompleta. "
+            "Instale a biblioteca VibeVoice em ambiente local compativel ou use o VibeVoice-1.5B."
         ) from exc
 
     logger.info("Carregando VibeVoice direto (%s). O modelo Large tem cerca de 18.7 GB.", model_id)
@@ -325,11 +364,17 @@ def _get_direct_vibevoice_model(model_key: str):
     if cuda_available:
         model_kwargs["device_map"] = "auto"
 
-    processor = VibeVoiceProcessor.from_pretrained(model_id)
-    model = VibeVoiceForConditionalGenerationInference.from_pretrained(
-        model_id,
-        **model_kwargs,
-    )
+    try:
+        processor = VibeVoiceProcessor.from_pretrained(model_id)
+        model = VibeVoiceForConditionalGenerationInference.from_pretrained(
+            model_id,
+            **model_kwargs,
+        )
+    except Exception as exc:
+        raise LargeModelUnavailableError(
+            f"Erro de carga no VibeVoice-Large ({model_id}): {exc}. "
+            "Nenhum fallback foi executado; revise dependencia, cache e estrategia de hardware."
+        ) from exc
     if not hasattr(model, "hf_device_map"):
         model = model.to("cuda" if cuda_available else "cpu")
     model.eval()
@@ -560,7 +605,7 @@ def _resolve_speaker_voice_map(
     """Mapeia cada número de speaker do roteiro para um voice_id.
 
     Prioridade: mapeamento explícito por speaker > voice_id único da request >
-    voz padrão da biblioteca > preset legado equivalente ao speaker_N.
+    voz padrão da biblioteca. Sem voz real, falha antes da geração.
     """
     from services import voice_profiles
 
@@ -577,8 +622,12 @@ def _resolve_speaker_voice_map(
         elif library_default:
             mapping[number] = library_default
         else:
-            mapping[number] = voice_profiles.resolve_voice_id(
-                _speaker_id_for_number(number, speaker_id)
+            raise VoiceUnavailableError(
+                "Crie, importe ou selecione uma voz real antes de gerar TTS."
+            )
+        if voice_profiles.is_preset(mapping[number]):
+            raise VoiceUnavailableError(
+                "Presets Windows não são vozes reais de produção. Crie, importe ou selecione uma voz real."
             )
     return mapping
 
@@ -610,13 +659,13 @@ def _run_native_vibevoice(
     """
     from services import voice_profiles
 
-    entry = _load_native_model(model_key, device_preference)
-    if entry is None:
-        return None
-
     script = _normalize_script_for_vibevoice(text, speaker_id)
     speaker_numbers = _unique_speaker_numbers(script)
     voice_map = _resolve_speaker_voice_map(speaker_numbers, speaker_id, voice_id, speaker_voices)
+
+    entry = _load_native_model(model_key, device_preference)
+    if entry is None:
+        return None
 
     with voice_profiles.voice_in_use(list(voice_map.values())):
         with use_custom_transformers():
@@ -717,6 +766,7 @@ def _run_direct_vibevoice(
     repetition_penalty: float,
     speed: float,
 ) -> Dict[str, Any]:
+    _preflight_direct_vibevoice_model(model_key)
     processor, model = _get_direct_vibevoice_model(model_key)
     script = _normalize_script_for_vibevoice(text, speaker_id)
     voice_samples, temp_paths = _build_voice_samples(script, speaker_id)
@@ -763,62 +813,6 @@ def _run_direct_vibevoice(
                 os.remove(path)
             except OSError:
                 pass
-
-
-def _fallback_sapi_or_sine(text: str, speaker_id: str, speed: float) -> Dict[str, Any]:
-    logger.info("Executando fallback SAPI5 do Windows para sintese de voz.")
-    try:
-        import win32com.client
-
-        sapi_voice = win32com.client.Dispatch("SAPI.SpVoice")
-        selected_voice = _select_sapi_voice(sapi_voice, speaker_id)
-        if selected_voice:
-            sapi_voice.Voice = selected_voice
-
-        sapi_rate = int((float(speed) - 1.0) * 8.0)
-        sapi_voice.Rate = max(-10, min(10, sapi_rate))
-
-        fd, temp_wav_path = tempfile.mkstemp(suffix=".wav")
-        os.close(fd)
-
-        file_stream = win32com.client.Dispatch("SAPI.SpFileStream")
-        file_stream.Open(temp_wav_path, 3, False)
-        sapi_voice.AudioOutputStream = file_stream
-        sapi_voice.Speak(text)
-        file_stream.Close()
-
-        with open(temp_wav_path, "rb") as wav_file:
-            wav_bytes = wav_file.read()
-
-        try:
-            os.remove(temp_wav_path)
-        except OSError:
-            pass
-        return _voice_result(
-            wav_bytes=wav_bytes,
-            engine_key="windows_sapi5",
-            engine_label="Windows SAPI5 (fallback offline)",
-            fallback=True,
-        )
-    except Exception as exc:
-        logger.error("Erro ao usar SAPI5: %s. Usando fallback senoidal.", exc)
-
-    sample_rate = 24000
-    duration = max(2.0, min(15.0, len(text) * 0.08))
-    t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
-    freq_carrier = 210 if speaker_id in {"speaker_2", "speaker_4"} else 120
-    envelope = np.sin(np.pi * t / duration) ** 0.5
-    signal = np.sin(2 * np.pi * freq_carrier * t)
-    signal += 0.5 * np.sin(2 * np.pi * (freq_carrier * 2) * t)
-    signal += 0.25 * np.sin(2 * np.pi * (freq_carrier * 3) * t)
-    signal = signal * (0.5 * (1.0 + np.sin(2 * np.pi * 5 * t))) * envelope
-    signal = signal / max(0.001, np.max(np.abs(signal)))
-    return _voice_result(
-        wav_bytes=_wav_bytes_from_array(signal, sample_rate=sample_rate, speed=speed),
-        engine_key="synthetic_tone",
-        engine_label="Sintese senoidal (fallback tecnico)",
-        fallback=True,
-    )
 
 
 def generate_voice_1_5b(
@@ -872,17 +866,24 @@ def generate_voice_1_5b_with_metadata(
     mas NÃO afetam o caminho nativo do 1.5B (seleção de token é argmax; a
     aleatoriedade real é a difusão, controlada por seed/n_diffusion_steps).
 
-    failure_policy: "fail" (sem retry/fallback), "cpu" (tenta CPU quando a GPU
-    falha) ou "sapi5" (permite a voz do Windows como último recurso, ROTULADA
-    como fallback). Voz personalizada inválida sempre é erro — nunca é trocada
-    silenciosamente.
+    failure_policy: "fail" (sem retry/fallback) ou "cpu" (tenta CPU quando a
+    GPU falha, mantendo a mesma engine). Voz personalizada inválida sempre é
+    erro — nunca é trocada silenciosamente.
     """
     if model_key not in TTS_MODEL_IDS:
         raise ValueError(f"Modelo TTS invalido: {model_key}")
     if not text or not text.strip():
         raise ValueError("Informe um texto para gerar voz.")
-    if failure_policy not in ("fail", "cpu", "sapi5"):
+    if failure_policy not in ("fail", "cpu"):
         raise ValueError(f"failure_policy inválida: {failure_policy}")
+
+    from services.tts_orchestration import orchestrate_tts
+    tts_plan = orchestrate_tts(
+        text,
+        default_speaker_id=speaker_id,
+        speaker_voices=speaker_voices,
+    )
+    text = tts_plan.engine_script
 
     if model_key == "tts_large":
         return _run_direct_vibevoice(
@@ -922,10 +923,6 @@ def generate_voice_1_5b_with_metadata(
         logger.error("Erro na geração nativa VibeVoice: %s", exc, exc_info=True)
         native_error = str(exc)
 
-    if failure_policy == "sapi5":
-        logger.warning("Geração nativa falhou (%s); usando SAPI5 por política explícita.",
-                       native_error)
-        return _fallback_sapi_or_sine(text=text, speaker_id=speaker_id, speed=speed)
     raise RuntimeError(
         f"Falha na geração com o VibeVoice 1.5B: {native_error} "
         f"(política '{failure_policy}' — sem fallback automático)."

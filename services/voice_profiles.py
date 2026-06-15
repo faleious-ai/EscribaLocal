@@ -179,17 +179,6 @@ def _public(profile: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def list_voices() -> Dict[str, Any]:
-    presets = [{
-        "id": preset["id"],
-        "name": preset["name"],
-        "source": "sapi5",
-        "language": "pt-BR",
-        "is_preset": True,
-        "is_default": False,
-        "consent_confirmed": True,
-        "notes": "Referência sintética da voz do Windows (temporária até você criar vozes próprias).",
-    } for preset in PRESET_VOICES]
-
     custom: List[Dict[str, Any]] = []
     if VOICES_DIR.is_dir():
         for entry in sorted(VOICES_DIR.iterdir()):
@@ -200,7 +189,7 @@ def list_voices() -> Dict[str, Any]:
                     record_app_event("voice_profile_invalid", voice_id=entry.name,
                                      error_message=str(exc)[:200])
     return {
-        "presets": presets,
+        "presets": [],
         "custom": custom,
         "total_disk_bytes": _dir_size(VOICES_DIR),
     }

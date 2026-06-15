@@ -74,7 +74,12 @@ def test_tts_endpoint_tolerates_unicode_engine_label(client, main_module, monkey
 
     response = client.post(
         "/api/tts/generate",
-        data={"text": "Olá, mundo.", "tts_model": "tts_1_5b", "speaker_id": "speaker_1"},
+        data={
+            "text": "Olá, mundo.",
+            "tts_model": "tts_1_5b",
+            "speaker_id": "speaker_1",
+            "voice_id": "11111111-2222-3333-4444-555555555555",
+        },
     )
     assert response.status_code == 200
     assert response.content == b"RIFF0000WAVEfake"

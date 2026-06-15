@@ -31,11 +31,13 @@
 
     function loadSettings() {
         try {
-            return Object.assign({
+            const loaded = Object.assign({
                 voice_id: "", style: "natural", cfg_scale: 1.7, n_diffusion_steps: 10,
                 max_frames: 0, seed: -1, failure_policy: "cpu", device: "auto",
                 speaker_voices: {}, custom_styles: {},
             }, JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"));
+            if (loaded.failure_policy === "sapi5") loaded.failure_policy = "cpu";
+            return loaded;
         } catch (e) { return { voice_id: "", style: "natural", cfg_scale: 1.7,
             n_diffusion_steps: 10, max_frames: 0, seed: -1, failure_policy: "cpu",
             device: "auto", speaker_voices: {}, custom_styles: {} }; }
@@ -85,9 +87,6 @@
     // ---- Sidebar -------------------------------------------------------------
     function voiceOptionsHtml(selected, allowEmpty) {
         let html = allowEmpty ? `<option value="">(voz padrão da biblioteca)</option>` : "";
-        html += `<optgroup label="Presets locais">` + voicesCache.presets.map((v) =>
-            `<option value="${v.id}" ${v.id === selected ? "selected" : ""}>${v.name}</option>`
-        ).join("") + `</optgroup>`;
         if (voicesCache.custom.length) {
             html += `<optgroup label="Vozes personalizadas">` + voicesCache.custom.map((v) =>
                 `<option value="${v.id}" ${v.id === selected ? "selected" : ""}>${v.name}${v.is_default ? " ★" : ""}</option>`
@@ -132,11 +131,10 @@
                                 <option value="cuda" ${settings.device === "cuda" ? "selected" : ""}>cuda</option>
                                 <option value="cpu" ${settings.device === "cpu" ? "selected" : ""}>cpu</option>
                             </select></label>
-                        <label title="fail = erro sem fallback; cpu = tenta CPU; sapi5 = permite voz do Windows como último recurso (sempre rotulada). Voz personalizada inválida é SEMPRE erro.">
+                        <label title="fail = erro sem fallback; cpu = tenta CPU mantendo a mesma engine. Voz personalizada inválida é SEMPRE erro.">
                             Falha <select id="vl-policy" class="logs-control">
                                 <option value="fail" ${settings.failure_policy === "fail" ? "selected" : ""}>falhar</option>
                                 <option value="cpu" ${settings.failure_policy === "cpu" ? "selected" : ""}>tentar CPU</option>
-                                <option value="sapi5" ${settings.failure_policy === "sapi5" ? "selected" : ""}>permitir SAPI5</option>
                             </select></label>
                     </div>
                 </details>
@@ -213,7 +211,11 @@
     }
 
     // ---- Modal: lista + criação ---------------------------------------------
-    function openModal() { modal.style.display = "flex"; renderModal(); }
+    function openModal() {
+        modal.style.zIndex = "2100";
+        modal.style.display = "flex";
+        renderModal();
+    }
     function closeModal() { modal.style.display = "none"; stopRecordingCleanup(); }
 
     function renderModal() {
@@ -249,8 +251,6 @@
         }).join("") || '<p class="model-notes">Nenhuma voz personalizada ainda — crie a primeira abaixo.</p>';
 
         modalBody.innerHTML = `
-            <h4 class="models-section-title">Presets locais</h4>
-            ${voicesCache.presets.map((p) => `<div class="model-notes">• ${p.name} — ${p.notes}</div>`).join("")}
             <h4 class="models-section-title" style="margin-top:12px;">
                 Vozes personalizadas (${(voicesCache.total_disk_bytes / 1e6 || 0).toFixed(1)}MB em disco)</h4>
             <div id="vl-custom-list">${customRows}</div>
@@ -504,6 +504,7 @@
     }
 
     // ---- Boot ----------------------------------------------------------------
+    window.openVoiceLibrary = openModal;
     modalClose.addEventListener("click", closeModal);
     modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
     document.addEventListener("DOMContentLoaded", refreshVoices);

@@ -194,14 +194,14 @@ _TTS_PARAMS: List[ParameterSpec] = [
     ParameterSpec(
         name="voice_id", engine="tts", type="str", default=None,
         label="Voz (biblioteca)",
-        description="Voz da biblioteca: preset local (voz do Windows) ou perfil clonado por gravação/upload.",
+        description="Voz real da biblioteca, criada por gravação, upload ou importação.",
         impact="conteudo",
     ),
     ParameterSpec(
         name="speaker_id", engine="tts", type="enum", default="speaker_1",
         choices=("speaker_1", "speaker_2", "speaker_3", "speaker_4"),
         label="Locutor (legado)",
-        description="Compatibilidade: speaker_N equivale ao preset local N quando nenhuma voz da biblioteca é escolhida.",
+        description="Compatibilidade com roteiros antigos; a identidade vocal vem da biblioteca de vozes reais.",
         impact="conteudo",
         advanced=True,
     ),
@@ -243,11 +243,11 @@ _TTS_PARAMS: List[ParameterSpec] = [
     ),
     ParameterSpec(
         name="failure_policy", engine="tts", type="enum", default="cpu",
-        choices=("fail", "cpu", "sapi5"),
+        choices=("fail", "cpu"),
         label="Política de falha",
-        description="fail = erro sem fallback; cpu = tenta CPU quando a GPU falhar (voz real, lenta); sapi5 = permite voz do Windows como último recurso, sempre rotulada.",
+        description="fail = erro sem fallback; cpu = tenta CPU quando a GPU falhar (mesma engine, voz real, lenta).",
         impact="misto",
-        risks="Voz personalizada inválida sempre gera erro — nenhuma política troca a voz escolhida silenciosamente.",
+        risks="Nenhuma política troca para SAPI5, tom sintético ou outra engine; voz personalizada inválida sempre gera erro.",
         advanced=True,
     ),
     ParameterSpec(

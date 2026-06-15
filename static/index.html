@@ -327,8 +327,8 @@
                             <div id="voice-library-container"></div>
                             <div class="recommendation-box">
                                 <strong>VibeVoice-TTS-1.5B:</strong> Modelo oficial de longa duração, indicado para textos longos e diálogos.
-                                <br><strong>VibeVoice-Large:</strong> Variante maior disponibilizada em aoi-ot/VibeVoice-Large; exige ambiente local com a biblioteca VibeVoice.
-                                <br><strong>Realtime-0.5B:</strong> Ideal para uso como assistente de voz e feedback imediato.
+                                <br><strong>VibeVoice-Large:</strong> Preservado no catálogo, mas bloqueado sem dependência VibeVoice, hardware suficiente e estratégia explícita; não recomendado em 6GB.
+                                <br><strong>Realtime-0.5B:</strong> Indisponível nesta versão; o checkpoint usa model_type vibevoice_streaming e exige adapter nativo compatível.
                             </div>
                         </div>
 
@@ -341,10 +341,10 @@
                             <!-- Mantido oculto por compatibilidade (perfis/configs antigos);
                                  a seleção de voz real é feita na Biblioteca de Vozes acima. -->
                             <select id="input-tts-speaker" class="form-select">
-                                <option value="speaker_1" selected>Preset local — voz Windows 1 (masculina)</option>
-                                <option value="speaker_2">Preset local — voz Windows 2 (feminina)</option>
-                                <option value="speaker_3">Preset local — voz Windows 3 (masculina)</option>
-                                <option value="speaker_4">Preset local — voz Windows 4 (feminina)</option>
+                                <option value="speaker_1" selected>Speaker 1</option>
+                                <option value="speaker_2">Speaker 2</option>
+                                <option value="speaker_3">Speaker 3</option>
+                                <option value="speaker_4">Speaker 4</option>
                             </select>
                         </div>
 
@@ -566,7 +566,7 @@ Voz 2: Sim, os modelos VibeVoice de TTS, Large e Realtime estão prontos.</texta
                         <div class="chat-container" style="margin-top: 20px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; height: 350px; display: flex; flex-direction: column; overflow: hidden;">
                             <div class="chat-messages" id="tts-chat-messages" style="flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;">
                                 <div class="chat-bubble assistant" style="background: rgba(0,242,254,0.08); padding: 10px 15px; border-radius: 12px 12px 12px 2px; align-self: flex-start; max-width: 80%; border: 1px solid rgba(0,242,254,0.15); font-size: 13px;">
-                                    Olá! Eu sou o assistente de voz em tempo real alimentado pelo VibeVoice-Realtime-0.5B. Digite uma mensagem abaixo e eu responderei falando imediatamente!
+                                    Realtime-0.5B está indisponível nesta versão. O checkpoint usa model_type vibevoice_streaming e só será habilitado após adapter nativo compatível.
                                 </div>
                             </div>
                             <div class="chat-input-row" style="display: flex; padding: 12px; border-top: 1px solid var(--border-color); background: rgba(0,0,0,0.2); gap: 10px; align-items: center;">
@@ -675,13 +675,13 @@ Voz 2: Sim, os modelos VibeVoice de TTS, Large e Realtime estão prontos.</texta
         </div>
     </div>
 
-    <script src="/static/app.js?v=5"></script>
+    <script src="/static/app.js?v=6"></script>
     <script src="/static/js/models_panel.js?v=1"></script>
     <script src="/static/js/logs_panel.js?v=1"></script>
     <script src="/static/js/presets_profiles.js?v=1"></script>
     <script src="/static/js/advanced_params.js?v=1"></script>
-    <script src="/static/js/setup_wizard.js?v=1"></script>
+    <script src="/static/js/setup_wizard.js?v=2"></script>
     <script src="/static/js/jobs_panel.js?v=1"></script>
-    <script src="/static/js/voice_library.js?v=1"></script>
+    <script src="/static/js/voice_library.js?v=2"></script>
 </body>
 </html>

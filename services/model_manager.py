@@ -137,7 +137,8 @@ MODEL_CATALOG: List[ModelSpec] = [
         approx_download_mb=18687, cache_kind="hf_cache",
         approx_vram_mb={"bfloat16": 19000},
         recommended_for_6gb=False,
-        notes="NÃO recomendado neste hardware: 18.7GB de download e mais VRAM do que a disponível (offload massivo, minutos por frase).",
+        notes="NÃO recomendado para 6GB: 18.7GB de download, ~19GB de VRAM e dependencia da biblioteca upstream VibeVoice. "
+              "A API bloqueia dependencia ausente, hardware insuficiente e erro de carga ate existir estrategia explicita.",
     ),
     ModelSpec(
         id="vibevoice-tts-rt-0.5b", engine="tts_realtime",
@@ -145,8 +146,8 @@ MODEL_CATALOG: List[ModelSpec] = [
         approx_download_mb=2035, cache_kind="hf_cache",
         approx_vram_mb={"bfloat16": 1500},
         notes="LIMITAÇÃO ATUAL: o checkpoint usa o model_type 'vibevoice_streaming', que nem o fork local "
-              "nem o transformers 5.10.2 conhecem — a geração cai no fallback SAPI5 (voz do Windows). "
-              "Suporte real exige atualizar o transformers (decisão explícita no painel de ambiente).",
+              "nem o transformers 5.10.2 conhecem — a geração nativa fica indisponível. "
+              "Suporte real exige atualizar o transformers ou criar adapter compatível por decisão explícita.",
     ),
 ]
 

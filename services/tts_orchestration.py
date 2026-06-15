@@ -1,0 +1,241 @@
+"""Orquestração pura antes das engines TTS.
+
+Esta camada transforma roteiro livre em conteúdo pronto para fala: resolve
+speakers, interpreta tags suportadas, normaliza casos comuns de PT-BR e
+segmenta sem deixar instruções literais vazarem para a engine.
+"""
+import re
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+
+
+class TtsOrchestrationError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class TtsSegment:
+    speaker_number: str
+    speaker_id: str
+    text: str
+    voice_id: Optional[str] = None
+    style: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class TtsPlan:
+    engine_script: str
+    segments: List[TtsSegment]
+    tags: List[Dict[str, str]]
+
+
+_speaker_line_pattern = re.compile(r"^(?:voz|voice|speaker)\s*([0-9]+)\s*:\s*(.*)$", re.IGNORECASE)
+_tag_pattern = re.compile(r"\[([a-zA-Z_][\w-]*)(?::([^\]]+))?\]")
+_valid_tags = {"style", "pause"}
+
+_months = {
+    1: "janeiro",
+    2: "fevereiro",
+    3: "marco",
+    4: "abril",
+    5: "maio",
+    6: "junho",
+    7: "julho",
+    8: "agosto",
+    9: "setembro",
+    10: "outubro",
+    11: "novembro",
+    12: "dezembro",
+}
+
+_units = {
+    0: "zero",
+    1: "um",
+    2: "dois",
+    3: "tres",
+    4: "quatro",
+    5: "cinco",
+    6: "seis",
+    7: "sete",
+    8: "oito",
+    9: "nove",
+    10: "dez",
+    11: "onze",
+    12: "doze",
+    13: "treze",
+    14: "quatorze",
+    15: "quinze",
+    16: "dezesseis",
+    17: "dezessete",
+    18: "dezoito",
+    19: "dezenove",
+}
+_tens = {
+    20: "vinte",
+    30: "trinta",
+    40: "quarenta",
+    50: "cinquenta",
+    60: "sessenta",
+    70: "setenta",
+    80: "oitenta",
+    90: "noventa",
+}
+_hundreds = {
+    100: "cento",
+    200: "duzentos",
+    300: "trezentos",
+    400: "quatrocentos",
+    500: "quinhentos",
+    600: "seiscentos",
+    700: "setecentos",
+    800: "oitocentos",
+    900: "novecentos",
+}
+
+
+def _number_to_words(value: int) -> str:
+    if value < 0:
+        return "menos " + _number_to_words(abs(value))
+    if value < 20:
+        return _units[value]
+    if value < 100:
+        ten = (value // 10) * 10
+        rest = value % 10
+        return _tens[ten] if rest == 0 else f"{_tens[ten]} e {_units[rest]}"
+    if value == 100:
+        return "cem"
+    if value < 1000:
+        hundred = (value // 100) * 100
+        rest = value % 100
+        return _hundreds[hundred] if rest == 0 else f"{_hundreds[hundred]} e {_number_to_words(rest)}"
+    if value < 10000:
+        thousands = value // 1000
+        rest = value % 1000
+        prefix = "mil" if thousands == 1 else f"{_number_to_words(thousands)} mil"
+        return prefix if rest == 0 else f"{prefix} e {_number_to_words(rest)}"
+    return str(value)
+
+
+def normalize_pt_br(text: str) -> str:
+    text = re.sub(r"\bDra\.", "doutora", text)
+    text = re.sub(r"\bDr\.", "doutor", text)
+    text = re.sub(r"\bSra\.", "senhora", text)
+    text = re.sub(r"\bSr\.", "senhor", text)
+
+    def replace_currency(match: re.Match) -> str:
+        reais = int(match.group(1).replace(".", ""))
+        centavos = int(match.group(2))
+        return f"{_number_to_words(reais)} reais e {_number_to_words(centavos)} centavos"
+
+    text = re.sub(r"R\$\s*([0-9.]+),([0-9]{2})", replace_currency, text)
+
+    def replace_date(match: re.Match) -> str:
+        day = int(match.group(1))
+        month = int(match.group(2))
+        if month not in _months:
+            return match.group(0)
+        return f"{_number_to_words(day)} de {_months[month]}"
+
+    text = re.sub(r"\b([0-9]{1,2})/([0-9]{1,2})(?:/[0-9]{2,4})?\b", replace_date, text)
+    text = re.sub(r"\b[0-9]+\b", lambda m: _number_to_words(int(m.group(0))), text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return re.sub(r"\s+([.,!?;:])", r"\1", text)
+
+
+def _speaker_id_for_number(number: str, default_speaker_id: str) -> str:
+    if number == "0":
+        return default_speaker_id
+    if number in {"1", "2", "3", "4"}:
+        return f"speaker_{number}"
+    raise TtsOrchestrationError("O TTS suporta no maximo 4 speakers por roteiro.")
+
+
+def _collect_lines(text: str, default_speaker_id: str) -> List[tuple[str, str]]:
+    current = re.search(r"([0-9]+)$", default_speaker_id or "")
+    current_number = current.group(1) if current else "1"
+    lines: List[tuple[str, str]] = []
+    for raw_line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = raw_line.strip()
+        if not line:
+            continue
+        match = _speaker_line_pattern.match(line)
+        if match:
+            current_number = match.group(1)
+            _speaker_id_for_number(current_number, default_speaker_id)
+            if match.group(2).strip():
+                lines.append((current_number, match.group(2).strip()))
+        elif lines:
+            number, previous = lines[-1]
+            lines[-1] = (number, f"{previous} {line}")
+        else:
+            lines.append((current_number, line))
+    if not lines:
+        lines.append((current_number, text.strip()))
+    return lines
+
+
+def _strip_tags(text: str) -> tuple[str, Dict[str, str], List[Dict[str, str]]]:
+    style: Dict[str, str] = {}
+    tags: List[Dict[str, str]] = []
+
+    def replace(match: re.Match) -> str:
+        name = match.group(1).lower()
+        value = (match.group(2) or "").strip()
+        if name not in _valid_tags:
+            raise TtsOrchestrationError(f"Tag invalida no roteiro TTS: [{name}]")
+        tags.append({"name": name, "value": value})
+        if name == "style" and value:
+            style["style"] = value
+        return " "
+
+    cleaned = _tag_pattern.sub(replace, text)
+    return re.sub(r"\s+", " ", cleaned).strip(), style, tags
+
+
+def _split_text(text: str, max_segment_chars: int) -> List[str]:
+    if len(text) <= max_segment_chars:
+        return [text]
+    sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", text) if part.strip()]
+    chunks: List[str] = []
+    current = ""
+    for sentence in sentences or [text]:
+        candidate = f"{current} {sentence}".strip()
+        if current and len(candidate) > max_segment_chars:
+            chunks.append(current)
+            current = sentence
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def orchestrate_tts(
+    text: str,
+    default_speaker_id: str = "speaker_1",
+    speaker_voices: Optional[Dict[str, str]] = None,
+    max_segment_chars: int = 500,
+) -> TtsPlan:
+    if not text or not text.strip():
+        raise TtsOrchestrationError("Informe um texto para gerar voz.")
+
+    all_tags: List[Dict[str, str]] = []
+    segments: List[TtsSegment] = []
+    for number, raw_text in _collect_lines(text, default_speaker_id):
+        clean_text, style, tags = _strip_tags(raw_text)
+        all_tags.extend(tags)
+        spoken_text = normalize_pt_br(clean_text)
+        for chunk in _split_text(spoken_text, max_segment_chars):
+            segments.append(TtsSegment(
+                speaker_number=number,
+                speaker_id=_speaker_id_for_number(number, default_speaker_id),
+                voice_id=(speaker_voices or {}).get(number),
+                text=chunk,
+                style=style,
+            ))
+
+    engine_script = "\n".join(
+        f"Speaker {segment.speaker_number}: {segment.text}"
+        for segment in segments if segment.text
+    )
+    return TtsPlan(engine_script=engine_script, segments=segments, tags=all_tags)

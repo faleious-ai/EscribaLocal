@@ -44,7 +44,7 @@
 
     function renderStep(status) {
         let content = "";
-        const stepsCount = 6;
+        const stepsCount = 7;
 
         if (currentStep === 1) {
             content = `
@@ -96,6 +96,29 @@
                 </div>
             `;
         } else if (currentStep === 5) {
+            const tts = status.tts || {};
+            const ttsReady = Boolean(tts.ready);
+            content = `
+                <h2>Criar sua voz</h2>
+                <p>Para usar TTS com voz real, crie ou importe uma voz autorizada antes de considerar a síntese pronta.</p>
+                <div style="background:rgba(0,242,254,0.05); border:1px solid rgba(0,242,254,0.2); padding:15px; border-radius:8px; margin:15px 0;">
+                    <p style="margin:0 0 8px 0; font-size:13px;"><b>Status do TTS:</b> ${ttsReady ? "pronto" : "pendente: crie ou importe uma voz real"}</p>
+                    <ul style="margin:0; padding-left:20px; font-size:12.5px; line-height:1.5;">
+                        <li>A biblioteca permite gravar pelo microfone quando o navegador autorizar.</li>
+                        <li>Você também pode enviar um arquivo de áudio ou importar um perfil exportado.</li>
+                        <li>O consentimento é obrigatório: use sua própria voz ou uma voz com autorização expressa.</li>
+                    </ul>
+                </div>
+                <div style="display:flex; gap:10px; align-items:center; margin-top:10px;">
+                    <button class="model-btn model-btn-primary" id="wizard-open-voices">Abrir Biblioteca de Vozes</button>
+                    <span class="model-notes">${ttsReady ? `${tts.custom_voice_count || 0} voz(es) disponível(is).` : "Sem voz criada/importada, o TTS seguirá pendente."}</span>
+                </div>
+                <div class="modal-footer" style="margin-top:20px; display:flex; justify-content:space-between;">
+                    <button class="model-btn" id="wizard-prev">Voltar</button>
+                    <button class="model-btn model-btn-primary" id="wizard-next">Avançar</button>
+                </div>
+            `;
+        } else if (currentStep === 6) {
             const retEnabled = status.retention.enabled;
             content = `
                 <h2>💾 Retenção de Uploads & Reexecução (Retry)</h2>
@@ -113,10 +136,12 @@
                     <button class="model-btn model-btn-primary" id="wizard-next">Avançar ➔</button>
                 </div>
             `;
-        } else if (currentStep === 6) {
+        } else if (currentStep === 7) {
+            const tts = status.tts || {};
             content = `
                 <h2>🎉 Tudo Pronto!</h2>
                 <p>A configuração inicial do EscribaLocal foi concluída.</p>
+                ${tts.ready ? "" : "<p><b>TTS pendente:</b> crie ou importe uma voz real na Biblioteca de Vozes antes de gerar fala.</p>"}
                 <p>Clique em <b>Concluir</b> para fechar este assistente e começar a transcrever ou sintetizar voz.</p>
                 <div class="modal-footer" style="margin-top:20px; display:flex; justify-content:space-between;">
                     <button class="model-btn" id="wizard-prev">⬅ Voltar</button>
@@ -140,6 +165,7 @@
         const prevBtn = document.getElementById("wizard-prev");
         const finishBtn = document.getElementById("wizard-finish");
         const applyPresetBtn = document.getElementById("wizard-apply-preset");
+        const openVoicesBtn = document.getElementById("wizard-open-voices");
 
         if (nextBtn) {
             nextBtn.addEventListener("click", () => {
@@ -158,6 +184,9 @@
         }
         if (applyPresetBtn) {
             applyPresetBtn.addEventListener("click", () => applyPreset(status.suggested_preset));
+        }
+        if (openVoicesBtn) {
+            openVoicesBtn.addEventListener("click", openVoiceLibraryFromWizard);
         }
 
         // Executar ações de passos específicos
@@ -287,6 +316,15 @@
         } catch (error) {
             if (statusSpan) statusSpan.textContent = "Falha ao aplicar preset: " + error.message;
             if (btn) btn.disabled = false;
+        }
+    }
+
+    function openVoiceLibraryFromWizard() {
+        if (typeof window.openVoiceLibrary === "function") {
+            window.openVoiceLibrary();
+            toast("Biblioteca de Vozes aberta. Grave, envie ou importe uma voz com consentimento.");
+        } else {
+            toast("Biblioteca de Vozes ainda não carregou. Tente novamente em alguns segundos.", true);
         }
     }
 

@@ -40,6 +40,13 @@ async def list_voices():
     return voice_profiles.list_voices()
 
 
+@router.get("/realtime-worker/status")
+async def realtime_worker_status():
+    from services.vibevoice_realtime_0_5b import get_realtime_worker_status
+
+    return get_realtime_worker_status()
+
+
 async def _create_voice(file: UploadFile, name: str, consent_confirmed: bool,
                         language: str, source: str):
     content = await file.read()

@@ -39,7 +39,7 @@ from services.transcriber import (
 )
 from services.vibevoice_service import transcribe_vibevoice_generator
 from services.vibevoice_tts_1_5b import SUPPORTED_LONGFORM_TTS_MODELS, generate_voice_1_5b_with_metadata
-from services.vibevoice_realtime_0_5b import generate_voice_realtime_wav_with_metadata, generate_voice_stream_0_5b
+from services.vibevoice_realtime_0_5b import RealtimeUnavailableError, generate_voice_realtime_wav_with_metadata, generate_voice_stream_0_5b
 from services.job_execution import run_sync_generator_job
 from services.jobs import job_manager
 from services.parameters_registry import validate_params
@@ -676,15 +676,14 @@ async def tts_generate(
     compatibilidade, mas NÃO afetam o caminho nativo do 1.5B (argmax + difusão).
     """
     import io
-    if tts_model == "realtime_0_5b":
-        # Adiado: o checkpoint usa model_type vibevoice_streaming, sem suporte
-        # nas libs atuais — selecioná-lo entregaria SAPI5 disfarçado.
+    if tts_model not in SUPPORTED_LONGFORM_TTS_MODELS:
+        if tts_model != "realtime_0_5b":
+            raise HTTPException(status_code=400, detail="Modelo TTS inválido.")
+    if failure_policy not in {"fail", "cpu"}:
         raise HTTPException(
             status_code=400,
-            detail="VibeVoice Realtime 0.5B: em desenvolvimento — indisponível nesta versão.",
+            detail="failure_policy inválida: use 'fail' ou 'cpu'. Fallback SAPI5/tom está desativado.",
         )
-    if tts_model not in SUPPORTED_LONGFORM_TTS_MODELS:
-        raise HTTPException(status_code=400, detail="Modelo TTS inválido.")
 
     speaker_voices_map = None
     if speaker_voices:
@@ -694,6 +693,24 @@ async def tts_generate(
                 raise ValueError("esperado objeto {speaker: voice_id}")
         except (json.JSONDecodeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=f"speaker_voices inválido: {exc}")
+    from services import voice_profiles
+
+    def _reject_preset_voice(candidate: str | None):
+        if candidate and voice_profiles.is_preset(voice_profiles.resolve_voice_id(candidate)):
+            raise HTTPException(
+                status_code=422,
+                detail="Presets Windows não são vozes reais de produção. Crie, importe ou selecione uma voz real.",
+            )
+
+    _reject_preset_voice(voice_id)
+    for candidate in (speaker_voices_map or {}).values():
+        _reject_preset_voice(candidate)
+    if tts_model != "realtime_0_5b" and not voice_id and not speaker_voices_map:
+        if not voice_profiles.get_default_voice_id():
+            raise HTTPException(
+                status_code=422,
+                detail="Crie, importe ou selecione uma voz real antes de gerar TTS.",
+            )
 
     try:
         record_app_event(
@@ -710,27 +727,41 @@ async def tts_generate(
         )
         # Executa no thread pool para não bloquear
         loop = asyncio.get_running_loop()
-        voice_result = await loop.run_in_executor(
-            None,
-            lambda: generate_voice_1_5b_with_metadata(
-                text=text,
-                speaker_id=speaker_id,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                repetition_penalty=repetition_penalty,
-                speed=speed,
-                model_key=tts_model,
-                voice_id=voice_id,
-                speaker_voices=speaker_voices_map,
-                cfg_scale=cfg_scale,
-                n_diffusion_steps=n_diffusion_steps,
-                max_frames=max_frames,
-                seed=seed,
-                failure_policy=failure_policy,
-                device=device,
+        if tts_model == "realtime_0_5b":
+            voice_result = await loop.run_in_executor(
+                None,
+                lambda: generate_voice_realtime_wav_with_metadata(
+                    text=text,
+                    speaker_id=speaker_id,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    repetition_penalty=repetition_penalty,
+                    speed=speed,
+                )
             )
-        )
+        else:
+            voice_result = await loop.run_in_executor(
+                None,
+                lambda: generate_voice_1_5b_with_metadata(
+                    text=text,
+                    speaker_id=speaker_id,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    repetition_penalty=repetition_penalty,
+                    speed=speed,
+                    model_key=tts_model,
+                    voice_id=voice_id,
+                    speaker_voices=speaker_voices_map,
+                    cfg_scale=cfg_scale,
+                    n_diffusion_steps=n_diffusion_steps,
+                    max_frames=max_frames,
+                    seed=seed,
+                    failure_policy=failure_policy,
+                    device=device,
+                )
+            )
         def _header_safe(value) -> str:
             # Headers HTTP precisam ser ASCII na prática: um travessão (U+2014)
             # derrubava o endpoint com 500, e bytes latin-1 (ex.: 'ó') quebram
@@ -771,10 +802,18 @@ async def tts_generate(
     except HTTPException:
         raise
     except Exception as e:
-        from services.vibevoice_tts_1_5b import VoiceUnavailableError
+        from services.vibevoice_tts_1_5b import LargeModelUnavailableError, VoiceUnavailableError
+        from services.tts_orchestration import TtsOrchestrationError
+        if isinstance(e, RealtimeUnavailableError):
+            logger.error(f"Realtime indisponível no HTTP de TTS: {e}")
+            record_exception_event("tts_generate_realtime_unavailable", e, requested_model=tts_model)
+            raise HTTPException(status_code=503, detail=e.to_payload())
         logger.error(f"Erro na geração de áudio TTS: {e}")
         record_exception_event("tts_generate_error", e, requested_model=tts_model)
-        status = 422 if isinstance(e, VoiceUnavailableError) else 500
+        status = 422 if isinstance(
+            e,
+            (LargeModelUnavailableError, TtsOrchestrationError, VoiceUnavailableError),
+        ) else 500
         raise HTTPException(status_code=status, detail=str(e))
 
 
@@ -856,6 +895,18 @@ async def websocket_tts_stream(websocket: WebSocket):
             
     except WebSocketDisconnect:
         logger.info("WebSocket de TTS Realtime desconectado.")
+    except RealtimeUnavailableError as e:
+        logger.error(f"Realtime indisponível no WebSocket de TTS: {e}")
+        record_exception_event("tts_stream_realtime_unavailable", e, requested_model="realtime_0_5b")
+        try:
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "code": "tts_realtime_unavailable",
+                "engine_key": "realtime_0_5b",
+                "message": str(e),
+            }))
+        except:
+            pass
     except Exception as e:
         logger.error(f"Erro no WebSocket de TTS: {e}")
         record_exception_event("tts_stream_error", e)

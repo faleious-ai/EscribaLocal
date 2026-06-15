@@ -25,7 +25,7 @@ PRESETS: List[Dict[str, Any]] = [
     {
         "id": "seguro",
         "label": "Seguro / Compatível",
-        "description": "Funciona em qualquer máquina, sem GPU. Whisper base em CPU e TTS de baixa latência (com fallback automático para a voz do Windows).",
+        "description": "Funciona em qualquer máquina, sem GPU. Whisper base em CPU e TTS 1.5B em CPU quando o modelo estiver pronto, sem fallback para voz do Windows.",
         "min_vram_mb": 0,
         "uses_cuda": False,
         "benchmark_dependent": False,
@@ -37,7 +37,7 @@ PRESETS: List[Dict[str, Any]] = [
                               "vibevoice_temperature": 0.0, "vibevoice_repetition_penalty": 1.1,
                               "vibevoice_num_beams": 1, "vibevoice_max_new_tokens": 2048},
             "tts": {"tts_model": "tts_1_5b", "speed": 1.0, "device": "cpu",
-                    "failure_policy": "sapi5"},
+                    "failure_policy": "cpu"},
         },
     },
     {
