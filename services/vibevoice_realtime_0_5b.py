@@ -6,6 +6,7 @@ import os
 import shlex
 import subprocess
 import sys
+import time
 import uuid
 from typing import Any, Dict, Generator, List
 
@@ -86,9 +87,11 @@ def _build_worker_request(
 
 def _invoke_realtime_worker(request: Dict[str, Any]) -> Dict[str, Any]:
     command = _resolve_worker_command()
+    started = time.perf_counter()
     record_app_event(
         "tts_realtime_worker_invoked",
         requested_model="realtime_0_5b",
+        worker_op=request.get("op"),
         worker_transport="subprocess",
         worker_protocol_version=request.get("protocol_version"),
         request_id=request.get("request_id"),
@@ -106,10 +109,30 @@ def _invoke_realtime_worker(request: Dict[str, Any]) -> Dict[str, Any]:
             check=False,
         )
     except FileNotFoundError as exc:
+        record_app_event(
+            "tts_realtime_worker_failed",
+            requested_model="realtime_0_5b",
+            worker_op=request.get("op"),
+            worker_transport="subprocess",
+            worker_protocol_version=request.get("protocol_version"),
+            request_id=request.get("request_id"),
+            failure_stage="spawn",
+            duration_ms=round((time.perf_counter() - started) * 1000, 1),
+        )
         raise RealtimeUnavailableError(
             "VibeVoice Realtime 0.5B indisponivel: worker isolado nao encontrado ou nao instalado."
         ) from exc
     except subprocess.TimeoutExpired as exc:
+        record_app_event(
+            "tts_realtime_worker_failed",
+            requested_model="realtime_0_5b",
+            worker_op=request.get("op"),
+            worker_transport="subprocess",
+            worker_protocol_version=request.get("protocol_version"),
+            request_id=request.get("request_id"),
+            failure_stage="timeout",
+            duration_ms=round((time.perf_counter() - started) * 1000, 1),
+        )
         raise RealtimeUnavailableError(
             "VibeVoice Realtime 0.5B indisponivel: worker isolado nao respondeu a tempo."
         ) from exc
@@ -120,6 +143,16 @@ def _invoke_realtime_worker(request: Dict[str, Any]) -> Dict[str, Any]:
         payload = json.loads(stdout) if stdout else {}
     except json.JSONDecodeError as exc:
         logger.error("Worker realtime retornou JSON invalido: %s", stdout[:400])
+        record_app_event(
+            "tts_realtime_worker_failed",
+            requested_model="realtime_0_5b",
+            worker_op=request.get("op"),
+            worker_transport="subprocess",
+            worker_protocol_version=request.get("protocol_version"),
+            request_id=request.get("request_id"),
+            failure_stage="invalid-json",
+            duration_ms=round((time.perf_counter() - started) * 1000, 1),
+        )
         raise RealtimeUnavailableError(
             "VibeVoice Realtime 0.5B indisponivel: worker isolado retornou resposta invalida."
         ) from exc
@@ -133,20 +166,25 @@ def _invoke_realtime_worker(request: Dict[str, Any]) -> Dict[str, Any]:
         record_app_event(
             "tts_realtime_worker_failed",
             requested_model="realtime_0_5b",
+            worker_op=request.get("op"),
             worker_transport="subprocess",
             worker_protocol_version=request.get("protocol_version"),
             request_id=request.get("request_id"),
             returncode=completed.returncode,
+            duration_ms=round((time.perf_counter() - started) * 1000, 1),
         )
         raise RealtimeUnavailableError(f"VibeVoice Realtime 0.5B indisponivel: {message}")
 
     record_app_event(
         "tts_realtime_worker_completed",
         requested_model="realtime_0_5b",
+        worker_op=request.get("op"),
         worker_transport=(payload.get("worker") or {}).get("transport", "subprocess"),
         worker_protocol_version=(payload.get("worker") or {}).get("protocol_version"),
         request_id=request.get("request_id"),
         worker_status=(payload.get("worker") or {}).get("status"),
+        worker_native_probe_status=((payload.get("worker") or {}).get("native_probe") or {}).get("status"),
+        duration_ms=round((time.perf_counter() - started) * 1000, 1),
     )
     return payload
 
