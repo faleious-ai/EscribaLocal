@@ -67,13 +67,7 @@ def test_install_detection(tmp_caches):
     assert "faster-whisper-tiny" in status["path"]
 
 
-def test_incomplete_download_not_installed(tmp_caches):
-    repo_dir = _install_fake_whisper(tmp_caches["whisper"])
-    (repo_dir / "blobs").mkdir()
-    (repo_dir / "blobs" / "abc.incomplete").write_bytes(b"parcial")
-    status = model_manager.get_install_status(model_manager.get_spec("whisper-tiny"))
-    assert status["installed"] is False
-    assert status["partial"] is True
+
 
 
 # -------------------------------------------------------------- remoção
@@ -261,13 +255,38 @@ def test_vibevoice_1_5b_states(tmp_caches, monkeypatch):
     # Limpar erro e simular convertido com sucesso
     (out_dir / "conversion_error.txt").unlink()
     (out_dir / "config.json").write_text("{}", encoding="utf-8")
-def test_incomplete_download_not_installed(tmp_caches):
+def test_incomplete_download_active_vs_orphan(tmp_caches):
+    from services.jobs import job_manager, JobState
+
+    # Caso 1: Download ativo em andamento
     repo_dir = _install_fake_whisper(tmp_caches["whisper"])
     (repo_dir / "blobs").mkdir()
-    (repo_dir / "blobs" / "abc.incomplete").write_bytes(b"parcial")
+    incomplete_file = repo_dir / "blobs" / "abc.incomplete"
+    incomplete_file.write_bytes(b"parcial")
+    
+    # Criar um job de download ativo para o whisper-tiny
+    job = job_manager.create(
+        kind="model_download",
+        params={"model_id": "whisper-tiny"},
+    )
+    job.state = JobState.RUNNING
+    
+    try:
+        status = model_manager.get_install_status(model_manager.get_spec("whisper-tiny"))
+        # Como há download ativo, o arquivo .incomplete é respeitado e o modelo fica como parcial
+        assert status["installed"] is False
+        assert status["partial"] is True
+        assert incomplete_file.exists() is True
+    finally:
+        # Finalizar o job para manter o estado limpo
+        job_manager.finish(job.job_id, JobState.CANCELLED)
+
+    # Caso 2: Sem download ativo (órfão)
+    # Ao chamar get_install_status, ele deve limpar o .incomplete órfão e reportar instalado
     status = model_manager.get_install_status(model_manager.get_spec("whisper-tiny"))
-    assert status["installed"] is False
-    assert status["partial"] is True
+    assert status["installed"] is True
+    assert status["partial"] is False
+    assert incomplete_file.exists() is False
 
 
 # -------------------------------------------------------------- remoção

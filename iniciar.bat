@@ -44,11 +44,13 @@ if %errorlevel% equ 0 (
     echo Suporte a GPU CUDA ja configurado no PyTorch.
     echo [3/4] Instalando/Atualizando demais dependencias...
     python -m pip install -r requirements.txt
+    python -m pip install chatterbox-tts --no-deps
 ) else (
     echo Instalando PyTorch com suporte a GPU NVIDIA CUDA...
     echo Isso pode levar alguns minutos dependendo da sua internet.
     python -m pip install torch --index-url https://download.pytorch.org/whl/cu121
     python -m pip install -r requirements.txt
+    python -m pip install chatterbox-tts --no-deps
 )
 
 echo [4/4] Inicializando o servidor FastAPI...

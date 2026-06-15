@@ -275,12 +275,46 @@ def get_install_status(spec: ModelSpec) -> Dict[str, Any]:
 
     has_weights = False
     incomplete = False
-    for root, _dirs, files in os.walk(repo_dir):
-        for name in files:
-            if name.endswith(".incomplete"):
+
+    snapshots_dir = repo_dir / "snapshots"
+    if snapshots_dir.is_dir():
+        # Varre apenas a pasta snapshots para buscar pesos e arquivos incompletos
+        for root, _dirs, files in os.walk(snapshots_dir):
+            for name in files:
+                if name.endswith(".incomplete"):
+                    incomplete = True
+                if name.endswith(_WEIGHT_SUFFIXES):
+                    has_weights = True
+        
+        # Se encontramos pesos e nenhum incomplete em snapshots, checamos por downloads
+        # ativos e limpamos possíveis arquivos .incomplete órfãos em blobs/
+        if has_weights and not incomplete:
+            is_downloading = any(
+                job["kind"] == "model_download" and job["params"].get("model_id") == spec.id
+                for job in job_manager.list()
+                if job["state"] in ("running", "queued")
+            )
+            if not is_downloading:
+                blobs_dir = repo_dir / "blobs"
+                if blobs_dir.is_dir():
+                    for f in blobs_dir.glob("*.incomplete"):
+                        try:
+                            f.unlink()
+                            record_app_event("model_orphan_incomplete_removed", model_id=spec.id, path=str(f))
+                        except OSError:
+                            pass
+            else:
+                # Se há download ativo em andamento, o modelo é considerado incompleto/parcial
                 incomplete = True
-            if name.endswith(_WEIGHT_SUFFIXES):
-                has_weights = True
+    else:
+        # Fallback para pastas de cache plano que não usam snapshots/
+        for root, _dirs, files in os.walk(repo_dir):
+            for name in files:
+                if name.endswith(".incomplete"):
+                    incomplete = True
+                if name.endswith(_WEIGHT_SUFFIXES):
+                    has_weights = True
+
     size_mb = round(_dir_size_bytes(repo_dir) / 1e6, 1)
     
     is_installed = has_weights and not incomplete
