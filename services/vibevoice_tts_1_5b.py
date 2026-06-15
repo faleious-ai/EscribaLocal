@@ -28,10 +28,12 @@ logger = logging.getLogger("EscribaLocal.VibeVoiceTTS")
 TTS_MODEL_IDS = {
     "tts_1_5b": "microsoft/VibeVoice-1.5B",
     "tts_large": "aoi-ot/VibeVoice-Large",
+    "chatterbox-tts-pt-br": "ResembleAI/Chatterbox-Multilingual-pt-br",
 }
 TTS_MODEL_DISPLAY_NAMES = {
     "tts_1_5b": "VibeVoice-TTS-1.5B (microsoft/VibeVoice-1.5B)",
     "tts_large": "VibeVoice-Large (aoi-ot/VibeVoice-Large)",
+    "chatterbox-tts-pt-br": "Chatterbox PT-BR (ResembleAI/Chatterbox-Multilingual-pt-br)",
 }
 SUPPORTED_LONGFORM_TTS_MODELS = set(TTS_MODEL_IDS)
 
@@ -894,6 +896,16 @@ def generate_voice_1_5b_with_metadata(
             top_p=top_p,
             top_k=top_k,
             repetition_penalty=repetition_penalty,
+            speed=speed,
+        )
+
+    if model_key == "chatterbox-tts-pt-br":
+        from services.chatterbox_adapter import chatterbox_engine
+        return chatterbox_engine.generate_voice_chatterbox(
+            text=text,
+            voice_id=voice_id,
+            speaker_voices=speaker_voices,
+            speaker_id=speaker_id,
             speed=speed,
         )
 

@@ -14,6 +14,7 @@
 
     // model_id -> { jobId, eventSource }
     const activeDownloads = new Map();
+    const activeConversions = new Map();
 
     function toast(message, isError) {
         if (typeof showToast === "function") showToast(message, Boolean(isError));
@@ -43,6 +44,7 @@
         tts_1_5b: "TTS",
         tts_large: "TTS",
         tts_realtime: "TTS Realtime",
+        tts_chatterbox: "TTS · Chatterbox",
     };
 
     // --- Renderização -------------------------------------------------------
@@ -65,22 +67,39 @@
                 if (action === "download") startDownload(model);
                 else if (action === "delete") deleteModel(model);
                 else if (action === "cancel") cancelDownload(modelId);
+                else if (action === "convert") startConversion(model);
+                else if (action === "cancel-convert") cancelConversion(modelId);
             });
         });
     }
 
     function renderRow(model) {
         const downloading = activeDownloads.has(model.id);
+        const converting = activeConversions.has(model.id);
+        
         const sizeText = model.installed
             ? formatMB(model.size_on_disk_mb) + " no disco"
             : formatMB(model.approx_download_mb) + " (download)";
 
         let statusBadge;
-        if (downloading) statusBadge = '<span class="model-badge model-badge-busy">Baixando...</span>';
-        else if (model.loaded) statusBadge = '<span class="model-badge model-badge-loaded">Na memória</span>';
-        else if (model.installed) statusBadge = '<span class="model-badge model-badge-ok">Instalado</span>';
-        else if (model.partial) statusBadge = '<span class="model-badge model-badge-warn">Parcial</span>';
-        else statusBadge = '<span class="model-badge">Não instalado</span>';
+        if (downloading) {
+            statusBadge = '<span class="model-badge model-badge-busy">Baixando...</span>';
+        } else if (converting) {
+            statusBadge = '<span class="model-badge model-badge-busy">Convertendo...</span>';
+        } else if (model.loaded) {
+            statusBadge = '<span class="model-badge model-badge-loaded">Na memória</span>';
+        } else if (model.status === "ready") {
+            statusBadge = '<span class="model-badge model-badge-ok">Instalado</span>';
+        } else if (model.status === "downloaded-raw") {
+            statusBadge = '<span class="model-badge model-badge-warn">Apenas baixado</span>';
+        } else if (model.status === "error") {
+            const errTitle = model.conversion_error ? `title="${model.conversion_error.replace(/"/g, '&quot;')}"` : "";
+            statusBadge = `<span class="model-badge model-badge-danger" ${errTitle}>Erro na conversão</span>`;
+        } else if (model.partial) {
+            statusBadge = '<span class="model-badge model-badge-warn">Parcial</span>';
+        } else {
+            statusBadge = '<span class="model-badge">Não instalado</span>';
+        }
 
         const warn = model.recommended_for_6gb ? "" : '<span class="model-badge model-badge-warn" title="Acima da capacidade deste hardware">⚠ 6GB</span>';
 
@@ -92,7 +111,20 @@
                     <span class="model-dl-text">aguardando dados...</span>
                 </div>
                 <button class="model-btn model-btn-danger" data-action="cancel" data-model="${model.id}">✖ Cancelar</button>`;
-        } else if (model.installed) {
+        } else if (converting) {
+            actions = `
+                <div class="model-dl-progress" id="model-convert-${model.id}">
+                    <div class="model-dl-bar"><div class="model-dl-fill" style="width:0%"></div></div>
+                    <span class="model-dl-text">aguardando conversão...</span>
+                </div>
+                <button class="model-btn model-btn-danger" data-action="cancel-convert" data-model="${model.id}">✖ Cancelar</button>`;
+        } else if (model.status === "ready") {
+            actions = `<button class="model-btn model-btn-danger" data-action="delete" data-model="${model.id}">🗑️ Remover do disco</button>`;
+        } else if (model.status === "downloaded-raw" || model.status === "error") {
+            actions = `
+                <button class="model-btn model-btn-primary" data-action="convert" data-model="${model.id}">⚙️ Converter</button>
+                <button class="model-btn model-btn-danger" style="margin-left: 4px;" data-action="delete" data-model="${model.id}">🗑️ Remover</button>`;
+        } else if (model.installed && model.id !== "vibevoice-tts-1.5b") {
             actions = `<button class="model-btn model-btn-danger" data-action="delete" data-model="${model.id}">🗑️ Remover do disco</button>`;
         } else {
             actions = `<button class="model-btn model-btn-primary" data-action="download" data-model="${model.id}">⬇️ Baixar (${formatMB(model.approx_download_mb)})</button>`;
@@ -157,7 +189,85 @@
                 const modelId = job.params && job.params.model_id;
                 if (modelId && !activeDownloads.has(modelId)) attachProgress(modelId, job.job_id);
             });
-        } catch (error) { /* sem jobs ativos */ }
+        } catch (error) { /* sem downloads ativos */ }
+
+        try {
+            const data = await fetchJSON("/api/jobs?kind=model_conversion&state=running");
+            (data.jobs || []).forEach((job) => {
+                const modelId = job.params && job.params.model_id;
+                if (modelId && !activeConversions.has(modelId)) attachConversionProgress(modelId, job.job_id);
+            });
+        } catch (error) { /* sem conversões ativas */ }
+    }
+
+    async function startConversion(model) {
+        if (!model) return;
+        if (!confirm(`Iniciar a conversão do ${model.display_name}?\nEste processo é pesado e pode demorar alguns minutos.`)) return;
+        try {
+            const data = await fetchJSON(`/api/models/${model.id}/convert`, {
+                method: "POST",
+            });
+            attachConversionProgress(model.id, data.job_id);
+            toast(`Conversão de ${model.display_name} iniciada.`);
+            refreshPanel();
+        } catch (error) {
+            toast(`Falha ao iniciar conversão: ${error.message}`, true);
+        }
+    }
+
+    function attachConversionProgress(modelId, jobId) {
+        const eventSource = new EventSource(`/api/jobs/${jobId}/events`);
+        activeConversions.set(modelId, { jobId, eventSource });
+
+        eventSource.onmessage = (message) => {
+            let event;
+            try { event = JSON.parse(message.data); } catch (e) { return; }
+
+            if (event.type === "progress") {
+                updateConversionProgressRow(modelId, event.message);
+            } else if (event.type === "job_snapshot") {
+                const state = event.job && event.job.state;
+                if (state && state !== "running" && state !== "queued") finishConversion(modelId, state);
+            } else if (event.type === "job_state") {
+                if (["completed", "failed", "cancelled"].includes(event.state)) finishConversion(modelId, event.state, event.error);
+            } else if (event.type === "error") {
+                toast(`Erro na conversão: ${event.message}`, true);
+            }
+        };
+        eventSource.onerror = () => {
+            finishConversion(modelId, null);
+        };
+    }
+
+    function updateConversionProgressRow(modelId, message) {
+        const container = document.getElementById(`model-convert-${modelId}`);
+        if (!container) return;
+        const fill = container.querySelector(".model-dl-fill");
+        const text = container.querySelector(".model-dl-text");
+        if (fill) fill.style.width = "50%";
+        if (text) text.textContent = message;
+    }
+
+    function finishConversion(modelId, state, error) {
+        const entry = activeConversions.get(modelId);
+        if (entry) {
+            entry.eventSource.close();
+            activeConversions.delete(modelId);
+        }
+        if (state === "completed") toast("Conversão concluída com sucesso!");
+        else if (state === "failed") toast(`Conversão falhou: ${error || "verifique se os arquivos safetensors não estão corrompidos."}`, true);
+        else if (state === "cancelled") toast("Conversão cancelada.", true);
+        if (modal.style.display !== "none") refreshPanel();
+    }
+
+    async function cancelConversion(modelId) {
+        const entry = activeConversions.get(modelId);
+        if (!entry) return;
+        try {
+            await fetchJSON(`/api/jobs/${entry.jobId}/cancel`, { method: "POST" });
+        } catch (error) {
+            toast(`Falha ao cancelar conversão: ${error.message}`, true);
+        }
     }
 
     async function startDownload(model) {

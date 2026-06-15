@@ -1230,6 +1230,12 @@ body {
     background: var(--accent-purple-glow);
 }
 
+.model-badge-danger {
+    border-color: var(--accent-danger);
+    color: var(--accent-danger);
+    background: hsla(350, 80%, 50%, 0.15);
+}
+
 .model-btn {
     background: var(--bg-input);
     border: 1px solid var(--border-color);

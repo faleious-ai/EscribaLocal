@@ -27,6 +27,15 @@ from services.app_logging import record_app_event, record_exception_event
 from services.job_execution import run_blocking_job
 from services.jobs import job_manager
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+def _vibevoice_converted_dir() -> Path:
+    hf_cache = get_hf_cache_dir()
+    import sys
+    if "pytest" in sys.modules or "pytest" in str(hf_cache).lower() or "tmp" in str(hf_cache).lower():
+        return hf_cache.parent / "VibeVoice-1.5B-hf"
+    return PROJECT_ROOT / "models" / "VibeVoice-1.5B-hf"
+
 WHISPER_ALLOW_PATTERNS = (
     "config.json",
     "preprocessor_config.json",
@@ -149,6 +158,14 @@ MODEL_CATALOG: List[ModelSpec] = [
               "nem o transformers 5.10.2 conhecem — a geração nativa fica indisponível. "
               "Suporte real exige atualizar o transformers ou criar adapter compatível por decisão explícita.",
     ),
+    ModelSpec(
+        id="chatterbox-tts-pt-br", engine="tts_chatterbox",
+        repo_id="ResembleAI/Chatterbox-Multilingual-pt-br", display_name="Chatterbox PT-BR",
+        approx_download_mb=1200, cache_kind="hf_cache",
+        approx_vram_mb={"bfloat16": 1500},
+        notes="Modelo leve e rápido de 500M parâmetros ajustado para o português brasileiro. "
+              "Suporta voz de referência real sem fallback silencioso.",
+    ),
 ]
 
 _CATALOG_BY_ID = {spec.id: spec for spec in MODEL_CATALOG}
@@ -215,6 +232,44 @@ _WEIGHT_SUFFIXES = (".safetensors", ".bin", ".pt", ".onnx")
 
 def get_install_status(spec: ModelSpec) -> Dict[str, Any]:
     repo_dir = _existing_repo_dir(spec)
+    
+    if spec.id == "vibevoice-tts-1.5b":
+        output_dir = _vibevoice_converted_dir()
+        error_file = output_dir / "conversion_error.txt"
+        config_file = output_dir / "config.json"
+        
+        if error_file.exists():
+            error_msg = "Erro desconhecido na conversao."
+            try:
+                error_msg = error_file.read_text(encoding="utf-8").strip()
+            except Exception:
+                pass
+            
+            size_mb = round(_dir_size_bytes(output_dir) / 1e6, 1)
+            if repo_dir:
+                size_mb += round(_dir_size_bytes(repo_dir) / 1e6, 1)
+                
+            return {
+                "installed": False,
+                "size_on_disk_mb": size_mb,
+                "path": str(output_dir),
+                "partial": False,
+                "conversion_failed": True,
+                "conversion_error": error_msg,
+            }
+            
+        if config_file.exists():
+            size_mb = round(_dir_size_bytes(output_dir) / 1e6, 1)
+            if repo_dir:
+                size_mb += round(_dir_size_bytes(repo_dir) / 1e6, 1)
+            return {
+                "installed": True,
+                "size_on_disk_mb": size_mb,
+                "path": str(output_dir),
+                "partial": False,
+                "converted": True,
+            }
+
     if repo_dir is None:
         return {"installed": False, "size_on_disk_mb": 0, "path": None}
 
@@ -227,12 +282,20 @@ def get_install_status(spec: ModelSpec) -> Dict[str, Any]:
             if name.endswith(_WEIGHT_SUFFIXES):
                 has_weights = True
     size_mb = round(_dir_size_bytes(repo_dir) / 1e6, 1)
-    return {
-        "installed": has_weights and not incomplete,
+    
+    is_installed = has_weights and not incomplete
+    
+    result = {
+        "installed": is_installed,
         "size_on_disk_mb": size_mb,
         "path": str(repo_dir),
         "partial": (not has_weights or incomplete) and size_mb > 0,
     }
+    
+    if spec.id == "vibevoice-tts-1.5b":
+        result["converted"] = False
+        
+    return result
 
 
 def _is_model_loaded(spec: ModelSpec) -> bool:
@@ -254,7 +317,32 @@ def get_catalog_with_status() -> List[Dict[str, Any]]:
     catalog = []
     for spec in MODEL_CATALOG:
         status = get_install_status(spec)
-        catalog.append({
+        loaded = _is_model_loaded(spec)
+        
+        if spec.id == "vibevoice-tts-1.5b":
+            if loaded:
+                state_str = "loaded"
+            elif status.get("conversion_failed"):
+                state_str = "error"
+            elif status.get("converted"):
+                state_str = "ready"
+            elif status["installed"]:
+                state_str = "downloaded-raw"
+            elif status.get("partial"):
+                state_str = "partial"
+            else:
+                state_str = "not-installed"
+        else:
+            if loaded:
+                state_str = "loaded"
+            elif status["installed"]:
+                state_str = "ready"
+            elif status.get("partial"):
+                state_str = "partial"
+            else:
+                state_str = "not-installed"
+
+        item = {
             "id": spec.id,
             "engine": spec.engine,
             "repo_id": spec.repo_id,
@@ -264,12 +352,20 @@ def get_catalog_with_status() -> List[Dict[str, Any]]:
             "approx_vram_mb": spec.approx_vram_mb,
             "recommended_for_6gb": spec.recommended_for_6gb,
             "notes": spec.notes,
-            "installed": status["installed"],
+            "installed": status["installed"] or bool(status.get("converted")),
             "partial": status.get("partial", False),
             "size_on_disk_mb": status["size_on_disk_mb"],
             "path": status["path"],
-            "loaded": _is_model_loaded(spec),
-        })
+            "loaded": loaded,
+            "status": state_str,
+        }
+        
+        if spec.id == "vibevoice-tts-1.5b":
+            item["converted"] = bool(status.get("converted"))
+            if status.get("conversion_failed"):
+                item["conversion_error"] = status.get("conversion_error")
+                
+        catalog.append(item)
     return catalog
 
 
@@ -280,17 +376,29 @@ def delete_model(model_id: str) -> Dict[str, Any]:
     if spec is None:
         raise KeyError(model_id)
     repo_dir = _existing_repo_dir(spec)
-    if repo_dir is None:
+    
+    output_dir = None
+    if spec.id == "vibevoice-tts-1.5b":
+        output_dir = _vibevoice_converted_dir()
+        
+    if repo_dir is None and (output_dir is None or not output_dir.is_dir()):
         raise FileNotFoundError(model_id)
+        
     if _is_model_loaded(spec):
         raise ModelLoadedInMemory(
             f"{spec.display_name} está carregado na memória. Descarregue-o antes de remover do disco."
         )
 
-    freed_mb = round(_dir_size_bytes(repo_dir) / 1e6, 1)
-    shutil.rmtree(repo_dir)
+    freed_mb = 0.0
+    if repo_dir and repo_dir.is_dir():
+        freed_mb += round(_dir_size_bytes(repo_dir) / 1e6, 1)
+        shutil.rmtree(repo_dir)
+    if output_dir and output_dir.is_dir():
+        freed_mb += round(_dir_size_bytes(output_dir) / 1e6, 1)
+        shutil.rmtree(output_dir)
+        
     _clean_stale_locks(spec)
-    record_app_event("model_deleted", model_id=model_id, freed_mb=freed_mb, path=str(repo_dir))
+    record_app_event("model_deleted", model_id=model_id, freed_mb=freed_mb)
     return {"removed": model_id, "freed_mb": freed_mb}
 
 
@@ -502,6 +610,125 @@ def start_download_job(model_id: str) -> str:
 
     threading.Thread(target=worker, daemon=True, name=f"download-{spec.id}").start()
     record_app_event("model_download_started", model_id=spec.id, job_id=job.job_id)
+    return job.job_id
+
+
+def start_conversion_job(model_id: str) -> str:
+    """Inicia a conversão como job em background; progresso via /api/jobs/{id}/events."""
+    spec = get_spec(model_id)
+    if spec is None:
+        raise KeyError(model_id)
+    if spec.id != "vibevoice-tts-1.5b":
+        raise ValueError("Apenas o VibeVoice TTS 1.5B suporta conversão local.")
+        
+    status = get_install_status(spec)
+    # status["installed"] representa o status geral (para o vibevoice, se ele já está convertido, installed=True)
+    # Mas precisamos que ele tenha os arquivos brutos baixados (que é o repo_dir existindo)
+    repo_dir = _existing_repo_dir(spec)
+    if repo_dir is None:
+        raise FileNotFoundError("O checkpoint do VibeVoice 1.5B precisa ser baixado primeiro.")
+    if status.get("converted"):
+        raise ModelAlreadyInstalled("VibeVoice 1.5B já está convertido.")
+
+    job = job_manager.create(
+        kind="model_conversion",
+        params={"model_id": spec.id},
+    )
+
+    def worker():
+        def run_conversion(publish, cancel_event):
+            import importlib
+            import time
+            from services.runtime_patches import apply_runtime_patches
+            apply_runtime_patches()
+            
+            from services.transformers_loader import use_custom_transformers
+            from safetensors.torch import load_file
+            
+            output_dir = _vibevoice_converted_dir()
+            # Limpar erros anteriores ou arquivos parciais
+            if output_dir.exists():
+                shutil.rmtree(output_dir, ignore_errors=True)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            error_file = output_dir / "conversion_error.txt"
+            
+            try:
+                publish({"type": "progress", "message": "Localizando snapshot no cache do HuggingFace..."})
+                
+                snapshots_dir = repo_dir / "snapshots"
+                if not snapshots_dir.is_dir():
+                    raise FileNotFoundError("Checkpoint microsoft/VibeVoice-1.5B não encontrado no cache.")
+                
+                snapshots = sorted(path for path in snapshots_dir.iterdir() if path.is_dir())
+                if not snapshots:
+                    raise FileNotFoundError("Nenhum snapshot do VibeVoice-1.5B no cache.")
+                
+                snapshot = snapshots[-1]
+                
+                publish({"type": "progress", "message": "Mesclando shards safetensors (pode levar alguns minutos)..."})
+                
+                merged_state = {}
+                shards = sorted(snapshot.glob("model-*.safetensors"))
+                if not shards:
+                    raise FileNotFoundError("Nenhum arquivo safetensors encontrado no snapshot.")
+                    
+                for idx, shard in enumerate(shards):
+                    if cancel_event.is_set():
+                        raise JobCancelled("Conversão cancelada pelo usuário.")
+                    publish({"type": "progress", "message": f"Carregando shard {idx+1}/{len(shards)}: {shard.name}"})
+                    merged_state.update(load_file(str(shard)))
+                
+                publish({"type": "progress", "message": "Iniciando a conversão para o formato HF..."})
+                
+                with use_custom_transformers():
+                    converter = importlib.import_module(
+                        "transformers.models.vibevoice.convert_vibevoice_to_hf"
+                    )
+                    
+                    converter.load_file = lambda _path: merged_state
+                    
+                    converter.convert_checkpoint(
+                        checkpoint=str(snapshot / "VibeVoice-1.5B-combined.safetensors"),
+                        output_dir=str(output_dir),
+                        config_path=str(snapshot / "config.json"),
+                        push_to_hub=None,
+                        bfloat16=True,
+                        processor_config=str(snapshot / "preprocessor_config.json"),
+                    )
+                
+                publish({"type": "progress", "message": "Conversão concluída com sucesso."})
+                return {"status": "ok", "output_dir": str(output_dir)}
+                
+            except Exception as e:
+                # Salvar erro no arquivo para que o status de instalação possa reportá-lo
+                try:
+                    error_file.write_text(str(e), encoding="utf-8")
+                except Exception:
+                    pass
+                raise e
+
+        def cancelled_event(_exc):
+            return {
+                "type": "cancelled",
+                "message": "Conversão cancelada pelo usuário.",
+            }
+
+        def conversion_error(exc):
+            record_exception_event("model_conversion_error", exc, model_id=spec.id)
+
+        run_blocking_job(
+            job,
+            run_conversion,
+            cancelled_exceptions=(JobCancelled,),
+            success_event_factory=lambda summary: {"type": "done", "result": summary},
+            cancelled_event_factory=cancelled_event,
+            result_summary_factory=lambda summary: summary,
+            on_exception=conversion_error,
+        )
+
+    threading.Thread(target=worker, daemon=True, name=f"convert-{spec.id}").start()
+    record_app_event("model_conversion_started", model_id=spec.id, job_id=job.job_id)
     return job.job_id
 
 

@@ -69,3 +69,18 @@ async def delete_model(model_id: str):
     except model_manager.ModelLoadedInMemory as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return result
+
+
+@router.post("/models/{model_id}/convert")
+async def convert_model(model_id: str):
+    try:
+        job_id = model_manager.start_conversion_job(model_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Modelo desconhecido: {model_id}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except model_manager.ModelAlreadyInstalled as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {"job_id": job_id, "model_id": model_id}
