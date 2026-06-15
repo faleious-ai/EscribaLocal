@@ -122,6 +122,12 @@ async def request_logging_middleware(request: Request, call_next):
         reset_request_id(token)
 
 
+# Cria a pasta de arquivos estáticos e uploads temporários
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "temp_uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(os.path.join(os.path.dirname(__file__), "static"), exist_ok=True)
+
+
 @app.on_event("startup")
 async def log_app_startup():
     record_app_event("app_startup", **get_log_paths())
@@ -129,10 +135,23 @@ async def log_app_startup():
     from services.config_store import apply_settings_on_startup
     apply_settings_on_startup()
 
-# Cria a pasta de arquivos estáticos e uploads temporários
-UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "temp_uploads")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(os.path.join(os.path.dirname(__file__), "static"), exist_ok=True)
+    # Abertura inteligente do navegador pós-startup (evita abas no reload do uvicorn e testes)
+    import sys
+    if "pytest" not in sys.modules and os.environ.get("ESCRIBA_AUTO_OPEN") != "0":
+        opened_flag = os.path.join(UPLOAD_DIR, ".browser_opened")
+        if not os.path.exists(opened_flag):
+            try:
+                with open(opened_flag, "w") as f:
+                    f.write("1")
+            except Exception:
+                pass
+            import threading
+            import webbrowser
+            threading.Thread(
+                target=lambda: webbrowser.open("http://127.0.0.1:8000/"),
+                daemon=True,
+                name="browser-open"
+            ).start()
 
 @app.get("/api/system-status")
 async def get_system_status():
