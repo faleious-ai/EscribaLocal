@@ -20,6 +20,10 @@
         personalizado: { label: "Personalizado", cfg_scale: null, n_diffusion_steps: null },
     };
     const STORAGE_KEY = "escriba_tts_voice_settings";
+    const LEGACY_VOICE_IDS = new Set([
+        "preset_windows_1", "preset_windows_2", "preset_windows_3", "preset_windows_4",
+        "speaker_1", "speaker_2", "speaker_3", "speaker_4",
+    ]);
 
     let voicesCache = { presets: [], custom: [] };
     let settings = loadSettings();
@@ -37,6 +41,10 @@
                 speaker_voices: {}, custom_styles: {},
             }, JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"));
             if (loaded.failure_policy === "sapi5") loaded.failure_policy = "cpu";
+            if (!loaded.speaker_voices || Array.isArray(loaded.speaker_voices)
+                    || typeof loaded.speaker_voices !== "object") {
+                loaded.speaker_voices = {};
+            }
             return loaded;
         } catch (e) { return { voice_id: "", style: "natural", cfg_scale: 1.7,
             n_diffusion_steps: 10, max_frames: 0, seed: -1, failure_policy: "cpu",
@@ -45,6 +53,59 @@
 
     function saveSettings() {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    }
+
+    function isLegacyVoiceId(value) {
+        return LEGACY_VOICE_IDS.has(String(value || ""));
+    }
+
+    function realVoiceIds() {
+        return new Set((voicesCache.custom || []).map((voice) => voice.id));
+    }
+
+    function uniqueMigrationVoiceId() {
+        const custom = voicesCache.custom || [];
+        const defaults = custom.filter((voice) => voice.is_default);
+        if (defaults.length === 1) return defaults[0].id;
+        if (custom.length === 1) return custom[0].id;
+        return "";
+    }
+
+    function migrateLegacyVoiceSettings() {
+        const knownRealVoiceIds = realVoiceIds();
+        const replacement = uniqueMigrationVoiceId();
+        let changed = false;
+
+        const migrateValue = (value) => {
+            const candidate = String(value || "");
+            if (!candidate) return "";
+            if (knownRealVoiceIds.has(candidate)) return candidate;
+            if (isLegacyVoiceId(candidate)) return replacement;
+            return "";
+        };
+
+        const migratedVoiceId = migrateValue(settings.voice_id);
+        if ((settings.voice_id || "") !== migratedVoiceId) {
+            settings.voice_id = migratedVoiceId;
+            changed = true;
+        }
+
+        const migratedMap = {};
+        for (const [speaker, value] of Object.entries(settings.speaker_voices || {})) {
+            const migrated = migrateValue(value);
+            if (migrated) migratedMap[speaker] = migrated;
+            if ((value || "") !== migrated) changed = true;
+        }
+        if (changed) {
+            settings.speaker_voices = migratedMap;
+            saveSettings();
+            toast(
+                replacement
+                    ? "Selecao TTS antiga migrada para a voz real disponivel."
+                    : "Selecao TTS antiga removida. Crie, importe ou selecione uma voz real.",
+                !replacement
+            );
+        }
     }
 
     async function fetchJSON(url, options) {
@@ -73,11 +134,13 @@
             failure_policy: settings.failure_policy,
             device: settings.device,
         };
-        if (settings.voice_id) extras.voice_id = settings.voice_id;
+        if (settings.voice_id && !isLegacyVoiceId(settings.voice_id)) {
+            extras.voice_id = settings.voice_id;
+        }
         if (mode === "dialog") {
             const map = {};
             for (const [speaker, vid] of Object.entries(settings.speaker_voices || {})) {
-                if (vid) map[speaker] = vid;
+                if (vid && !isLegacyVoiceId(vid)) map[speaker] = vid;
             }
             if (Object.keys(map).length) extras.speaker_voices = JSON.stringify(map);
         }
@@ -203,6 +266,7 @@
     async function refreshVoices() {
         try {
             voicesCache = await fetchJSON("/api/tts/voices");
+            migrateLegacyVoiceSettings();
             renderSidebar();
             if (modal.style.display !== "none") renderModal();
         } catch (error) {

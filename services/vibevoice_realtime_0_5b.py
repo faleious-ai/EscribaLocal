@@ -238,6 +238,11 @@ def get_realtime_worker_status() -> Dict[str, Any]:
 
 
 def _decode_worker_audio(payload: Dict[str, Any]) -> bytes:
+    worker = payload.get("worker") or {}
+    if worker.get("status") == "synthetic-smoke" or (worker.get("smoke") or {}).get("synthetic"):
+        raise RealtimeUnavailableError(
+            "VibeVoice Realtime 0.5B indisponivel: worker isolado retornou audio sintetico, nao PCM/WAV nativo real."
+        )
     audio = payload.get("audio") or {}
     if audio.get("format") != "pcm_s16le":
         raise RealtimeUnavailableError(
@@ -287,9 +292,14 @@ def generate_voice_stream_0_5b(
         )
 
     engine = payload.get("engine") or {}
+    engine_key = engine.get("engine_key")
+    if not engine_key:
+        raise RealtimeUnavailableError(
+            "VibeVoice Realtime 0.5B indisponivel: worker isolado nao declarou engine_key."
+        )
     if status_callback:
         status_callback(_engine_metadata(
-            engine.get("engine_key", "realtime_0_5b"),
+            engine_key,
             engine.get("engine_label", "VibeVoice-Realtime-0.5B"),
             bool(engine.get("fallback", False)),
             worker=payload.get("worker"),

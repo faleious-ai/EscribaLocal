@@ -1,5 +1,4 @@
 import json
-import math
 import os
 import platform
 import sys
@@ -15,12 +14,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 def _native_runtime_enabled() -> bool:
     return os.environ.get("ESCRIBA_REALTIME_NATIVE_ENABLE", "").strip().lower() in {
-        "1", "true", "yes", "on",
-    }
-
-
-def _synthetic_smoke_enabled() -> bool:
-    return os.environ.get("ESCRIBA_REALTIME_SYNTHETIC_SMOKE_ENABLE", "").strip().lower() in {
         "1", "true", "yes", "on",
     }
 
@@ -304,7 +297,6 @@ def _worker_environment(request: Dict[str, Any]) -> Dict[str, Any]:
         "supports_native_realtime": False,
         "native_runtime_enabled": _native_runtime_enabled(),
         "deep_probe_enabled": _deep_probe_enabled(),
-        "synthetic_smoke_enabled": _synthetic_smoke_enabled(),
         "model_id": request.get("model_id"),
     }
 
@@ -315,17 +307,7 @@ def _worker_capabilities(native_probe: Dict[str, Any]) -> Dict[str, Any]:
         "native_probe": True,
         "deep_native_probe": _deep_probe_enabled(),
         "synthesize_stream": False,
-        "synthetic_smoke": bool(native_probe.get("ok")) and _synthetic_smoke_enabled(),
     }
-
-
-def _synthetic_smoke_pcm_bytes(sample_rate: int = 24000, duration_ms: int = 300) -> bytes:
-    frame_count = max(1, int(sample_rate * duration_ms / 1000))
-    pcm = bytearray()
-    for index in range(frame_count):
-        sample = int(12000 * math.sin(2 * math.pi * 220 * (index / sample_rate)))
-        pcm.extend(int(sample).to_bytes(2, byteorder="little", signed=True))
-    return bytes(pcm)
 
 
 def _healthcheck_response(request: Dict[str, Any]) -> Dict[str, Any]:
@@ -355,10 +337,8 @@ def _synthesize_unavailable_response(request: Dict[str, Any], model_status: Dict
             "Worker isolado disponivel, mas a pilha nativa do Realtime 0.5B ainda nao carregou com sucesso: "
             f"{native_probe.get('message') or native_probe.get('reason') or native_probe.get('status')}."
         )
-    elif not _synthetic_smoke_enabled():
-        message = "Worker isolado carregou o config nativo, mas o smoke controlado ainda esta desligado neste ambiente."
     else:
-        message = "Worker isolado carregou o config nativo, mas a sintese Realtime 0.5B ainda nao foi validada neste ambiente."
+        message = "Worker isolado carregou a pilha nativa, mas a sintese PCM/WAV real do Realtime 0.5B ainda nao foi validada neste ambiente."
 
     return {
         "ok": False,
@@ -377,42 +357,11 @@ def _synthesize_unavailable_response(request: Dict[str, Any], model_status: Dict
         },
         "worker": _base_worker_payload(
             request,
-            status=native_probe.get("status", "stub-unavailable"),
+            status=native_probe.get("status", "native-unavailable"),
             environment=_worker_environment(request),
             capabilities=_worker_capabilities(native_probe),
             model=model_status,
             native_probe=native_probe,
-        ),
-        "request_id": request.get("request_id"),
-    }
-
-
-def _synthetic_smoke_response(request: Dict[str, Any], model_status: Dict[str, Any], native_probe: Dict[str, Any]) -> Dict[str, Any]:
-    pcm_bytes = _synthetic_smoke_pcm_bytes()
-    return {
-        "ok": True,
-        "engine": {
-            "engine_key": "realtime_0_5b",
-            "engine_label": "VibeVoice Realtime 0.5B (worker isolado)",
-            "fallback": False,
-        },
-        "audio": {
-            "format": "pcm_s16le",
-            "sample_rate": 24000,
-            "data_hex": pcm_bytes.hex(),
-        },
-        "worker": _base_worker_payload(
-            request,
-            status="synthetic-smoke",
-            environment=_worker_environment(request),
-            capabilities=_worker_capabilities(native_probe),
-            model=model_status,
-            native_probe=native_probe,
-            smoke={
-                "synthetic": True,
-                "duration_ms": 300,
-                "sample_rate": 24000,
-            },
         ),
         "request_id": request.get("request_id"),
     }
@@ -421,8 +370,6 @@ def _synthetic_smoke_response(request: Dict[str, Any], model_status: Dict[str, A
 def _synthesize_response(request: Dict[str, Any]) -> Dict[str, Any]:
     model_status = _get_model_status(request.get("model_id"))
     native_probe = _probe_native_stack(model_status)
-    if native_probe.get("ok") and _synthetic_smoke_enabled():
-        return _synthetic_smoke_response(request, model_status, native_probe)
     return _synthesize_unavailable_response(request, model_status, native_probe)
 
 

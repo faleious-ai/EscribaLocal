@@ -5,7 +5,6 @@ import io
 import importlib.util
 import logging
 import re
-import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -59,10 +58,6 @@ VIBEVOICE_SYSTEM_PROMPT = (
     " Transform the text provided by various speakers into speech output, "
     "utilizing the distinct voice of each respective speaker.\n"
 )
-VOICE_REFERENCE_TEXT = (
-    "Esta é uma amostra de voz para clonagem. A fala gerada deve soar clara e natural."
-)
-
 _native_models: Dict[str, Dict[str, Any]] = {}   # model_key -> {processor, model, device, gen_cfg}
 _voice_embeds_cache: Dict[str, Any] = {}          # f"{model_key}:{speaker_id}" -> tensor (n, hidden)
 _direct_processors: Dict[str, Any] = {}
@@ -172,30 +167,6 @@ def _load_native_model(model_key: str, device_preference: str = "auto"):
     return None
 
 
-def _voice_reference_waveform(speaker_id: str) -> "np.ndarray | None":
-    """Amostra de FALA limpa em PT-BR (SAPI5, 24kHz) usada como referência de
-    clonagem por locutor. Sem referência o modelo 'inventa' uma voz instável e
-    a pronúncia degrada — comprovado no round-trip. Nunca usa tom senoidal."""
-    try:
-        import win32com.client
-
-        sapi = win32com.client.Dispatch("SAPI.SpVoice")
-        selected = _select_sapi_voice(sapi, speaker_id)
-        if selected is not None:
-            sapi.Voice = selected
-        stream = win32com.client.Dispatch("SAPI.SpMemoryStream")
-        stream.Format.Type = 30  # SPSF_24kHz16BitMono
-        sapi.AudioOutputStream = stream
-        sapi.Speak(VOICE_REFERENCE_TEXT)
-        pcm = np.frombuffer(bytes(stream.GetData()), dtype=np.int16)
-        if pcm.size < ACOUSTIC_HOP:
-            return None
-        return pcm.astype(np.float32) / 32768.0
-    except Exception as exc:
-        logger.warning("Sem referência de voz SAPI5 (%s); gerando sem condicionamento.", exc)
-        return None
-
-
 class VoiceUnavailableError(RuntimeError):
     """Voz escolhida ausente/corrompida — NUNCA cair silenciosamente em outra."""
 
@@ -262,7 +233,7 @@ def build_reference_embeddings(reference_wav_path: str):
 
 
 def _embeds_for_voice(entry: Dict[str, Any], model_key: str, voice_id: str):
-    """Embeddings da voz (preset SAPI5 ou perfil persistido), no device.
+    """Embeddings da voz real persistida, no device.
 
     Cache em memória por identidade real: model_key + revisão do checkpoint +
     voice_id + hash da referência — trocar a gravação ou reconverter o modelo
@@ -272,22 +243,6 @@ def _embeds_for_voice(entry: Dict[str, Any], model_key: str, voice_id: str):
 
     revision = get_model_revision(model_key)
     resolved = voice_profiles.resolve_voice_id(voice_id)
-
-    if voice_profiles.is_preset(resolved):
-        cache_key = f"{model_key}:{revision}:{resolved}:sapi5"
-        if cache_key not in _voice_embeds_cache:
-            speaker_hint = next(p["speaker_hint"] for p in voice_profiles.PRESET_VOICES
-                                if p["id"] == resolved)
-            waveform = _voice_reference_waveform(speaker_hint)
-            if waveform is None:
-                raise VoiceUnavailableError(
-                    f"Preset {resolved} indisponível (SAPI5 não respondeu). "
-                    "Crie uma voz personalizada na biblioteca de vozes."
-                )
-            _voice_embeds_cache[cache_key] = _embeds_from_waveform(entry, waveform)
-            logger.info("Referência do preset %s preparada (%d frames).",
-                        resolved, int(_voice_embeds_cache[cache_key].shape[0]))
-        return _voice_embeds_cache[cache_key]
 
     try:
         profile = voice_profiles.get_voice(resolved)
@@ -446,96 +401,6 @@ def _unique_speaker_numbers(script: str) -> List[str]:
     return speakers or ["1"]
 
 
-def _select_sapi_voice(sapi_voice, speaker_id: str):
-    voices = list(sapi_voice.GetVoices())
-    if not voices:
-        return None
-
-    is_female = speaker_id in {"speaker_2", "speaker_4"}
-    preferred_terms = ("Maria", "Zira") if is_female else ("Daniel", "David", "Mark")
-
-    for voice in voices:
-        desc = voice.GetDescription()
-        if any(term in desc for term in preferred_terms):
-            return voice
-    for voice in voices:
-        desc = voice.GetDescription()
-        if "Portuguese" in desc or "Brazil" in desc or "Brasil" in desc:
-            return voice
-    return voices[0]
-
-
-def _write_sine_voice_prompt(path: str, speaker_id: str):
-    sample_rate = 24000
-    duration = 1.4
-    frequency = 210 if speaker_id in {"speaker_2", "speaker_4"} else 135
-    t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
-    envelope = np.sin(np.pi * t / duration)
-    signal = (
-        np.sin(2 * np.pi * frequency * t)
-        + 0.35 * np.sin(2 * np.pi * frequency * 2.0 * t)
-        + 0.15 * np.sin(2 * np.pi * frequency * 3.0 * t)
-    ) * envelope * 0.45
-    wavfile.write(path, sample_rate, (signal * 32767).astype(np.int16))
-
-
-def _create_voice_prompt_wav(speaker_id: str) -> str:
-    fd, temp_path = tempfile.mkstemp(suffix=".wav")
-    os.close(fd)
-
-    prompt_texts = {
-        "speaker_1": "Ola, esta e uma amostra de voz clara, firme e natural.",
-        "speaker_2": "Ola, esta e uma amostra de voz suave, clara e natural.",
-        "speaker_3": "Ola, esta e uma amostra de voz narrativa, calma e natural.",
-        "speaker_4": "Ola, esta e uma amostra de voz dinamica, leve e natural.",
-    }
-    prompt_text = prompt_texts.get(speaker_id, prompt_texts["speaker_1"])
-
-    try:
-        import win32com.client
-
-        sapi_voice = win32com.client.Dispatch("SAPI.SpVoice")
-        selected_voice = _select_sapi_voice(sapi_voice, speaker_id)
-        if selected_voice:
-            sapi_voice.Voice = selected_voice
-
-        file_stream = win32com.client.Dispatch("SAPI.SpFileStream")
-        file_stream.Open(temp_path, 3, False)
-        sapi_voice.AudioOutputStream = file_stream
-        sapi_voice.Speak(prompt_text)
-        file_stream.Close()
-    except Exception as exc:
-        logger.warning("Nao foi possivel gerar amostra SAPI5; usando amostra sintetica: %s", exc)
-        _write_sine_voice_prompt(temp_path, speaker_id)
-
-    return temp_path
-
-
-def _load_voice_prompt(path: str) -> np.ndarray:
-    import librosa
-    import soundfile as sf
-
-    voice, sample_rate = sf.read(path)
-    if voice.ndim > 1:
-        voice = voice.mean(axis=1)
-    if sample_rate != 24000:
-        voice = librosa.resample(voice.astype(np.float32), orig_sr=sample_rate, target_sr=24000)
-    return voice.astype(np.float32)
-
-
-def _build_voice_samples(script: str, default_speaker_id: str) -> Tuple[List[np.ndarray], List[str]]:
-    voice_samples: List[np.ndarray] = []
-    temp_paths: List[str] = []
-
-    for speaker_number in _unique_speaker_numbers(script):
-        speaker_id = _speaker_id_for_number(speaker_number, default_speaker_id)
-        prompt_path = _create_voice_prompt_wav(speaker_id)
-        temp_paths.append(prompt_path)
-        voice_samples.append(_load_voice_prompt(prompt_path))
-
-    return voice_samples, temp_paths
-
-
 def _get_model_input_device(model) -> torch.device:
     device_map = getattr(model, "hf_device_map", None)
     if isinstance(device_map, dict):
@@ -627,7 +492,7 @@ def _resolve_speaker_voice_map(
             raise VoiceUnavailableError(
                 "Crie, importe ou selecione uma voz real antes de gerar TTS."
             )
-        if voice_profiles.is_preset(mapping[number]):
+        if voice_profiles.is_legacy_windows_voice_id(mapping[number]):
             raise VoiceUnavailableError(
                 "Presets Windows não são vozes reais de produção. Crie, importe ou selecione uma voz real."
             )
@@ -769,52 +634,11 @@ def _run_direct_vibevoice(
     speed: float,
 ) -> Dict[str, Any]:
     _preflight_direct_vibevoice_model(model_key)
-    processor, model = _get_direct_vibevoice_model(model_key)
-    script = _normalize_script_for_vibevoice(text, speaker_id)
-    voice_samples, temp_paths = _build_voice_samples(script, speaker_id)
-
-    try:
-        inputs = processor(
-            text=[script],
-            voice_samples=[voice_samples],
-            padding=True,
-            return_tensors="pt",
-            return_attention_mask=True,
-        )
-        inputs = _move_inputs_to_device(inputs, _get_model_input_device(model))
-
-        generation_config: Dict[str, Any] = {"do_sample": bool(temperature > 0)}
-        if temperature > 0:
-            generation_config["temperature"] = temperature
-            generation_config["top_p"] = top_p
-            generation_config["top_k"] = top_k
-        if repetition_penalty and repetition_penalty != 1.0:
-            generation_config["repetition_penalty"] = repetition_penalty
-
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=None,
-                cfg_scale=1.3,
-                tokenizer=processor.tokenizer,
-                generation_config=generation_config,
-                verbose=False,
-            )
-
-        if not getattr(outputs, "speech_outputs", None) or outputs.speech_outputs[0] is None:
-            raise RuntimeError("O VibeVoice nao retornou audio.")
-        return _voice_result(
-            wav_bytes=_wav_bytes_from_array(outputs.speech_outputs[0], sample_rate=24000, speed=speed),
-            engine_key=model_key,
-            engine_label=TTS_MODEL_DISPLAY_NAMES[model_key],
-            fallback=False,
-        )
-    finally:
-        for path in temp_paths:
-            try:
-                os.remove(path)
-            except OSError:
-                pass
+    raise LargeModelUnavailableError(
+        "VibeVoice-Large indisponivel: referencias reais por speaker ainda nao foram "
+        "integradas a este caminho. Amostra artificial, SAPI5 ou senoide nao sao "
+        "caminhos validos de producao."
+    )
 
 
 def generate_voice_1_5b(

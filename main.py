@@ -59,6 +59,25 @@ app = FastAPI(title="EscribaLocal - Transcrição de Áudio de Alta Performance"
 SYSTEM_STATUS_LOG_INTERVAL_SECONDS = 60
 _last_system_status_log_at = 0.0
 
+
+class TtsEngineResultError(ValueError):
+    pass
+
+
+def validate_tts_engine_result(requested_model: str, voice_result: dict) -> str:
+    executed_engine = voice_result.get("engine_key")
+    if not executed_engine:
+        raise TtsEngineResultError(
+            "Engine executada nao declarou engine_key explicita; o audio foi recusado."
+        )
+    if voice_result.get("fallback") or executed_engine != requested_model:
+        raise TtsEngineResultError(
+            "Engine executada nao corresponde a engine solicitada ou indicou fallback; "
+            "o audio foi recusado."
+        )
+    return executed_engine
+
+
 # Habilita CORS
 app.add_middleware(
     CORSMiddleware,
@@ -715,7 +734,9 @@ async def tts_generate(
     from services import voice_profiles
 
     def _reject_preset_voice(candidate: str | None):
-        if candidate and voice_profiles.is_preset(voice_profiles.resolve_voice_id(candidate)):
+        if candidate and voice_profiles.is_legacy_windows_voice_id(
+            voice_profiles.resolve_voice_id(candidate)
+        ):
             raise HTTPException(
                 status_code=422,
                 detail="Presets Windows não são vozes reais de produção. Crie, importe ou selecione uma voz real.",
@@ -781,6 +802,22 @@ async def tts_generate(
                     device=device,
                 )
             )
+        try:
+            executed_engine = validate_tts_engine_result(tts_model, voice_result)
+        except TtsEngineResultError:
+            record_app_event(
+                "tts_generate_engine_mismatch_rejected",
+                requested_model=tts_model,
+                engine_key=voice_result.get("engine_key"),
+                fallback=bool(voice_result.get("fallback")),
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "Engine executada não corresponde à engine solicitada ou indicou fallback; "
+                    "o áudio foi recusado."
+                ),
+            )
         def _header_safe(value) -> str:
             # Headers HTTP precisam ser ASCII na prática: um travessão (U+2014)
             # derrubava o endpoint com 500, e bytes latin-1 (ex.: 'ó') quebram
@@ -791,7 +828,7 @@ async def tts_generate(
 
         headers = {
             "X-Escriba-TTS-Requested": _header_safe(tts_model),
-            "X-Escriba-TTS-Engine-Key": _header_safe(voice_result.get("engine_key", tts_model)),
+            "X-Escriba-TTS-Engine-Key": _header_safe(executed_engine),
             "X-Escriba-TTS-Engine": _header_safe(voice_result.get("engine_label", tts_model)),
             "X-Escriba-TTS-Fallback": "true" if voice_result.get("fallback") else "false",
         }

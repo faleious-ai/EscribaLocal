@@ -364,7 +364,7 @@ class ChatterboxAdapter:
             )
 
         resolved_voice_id = voice_profiles.resolve_voice_id(resolved_voice_id)
-        if voice_profiles.is_preset(resolved_voice_id):
+        if voice_profiles.is_legacy_windows_voice_id(resolved_voice_id):
             raise VoiceUnavailableError(
                 "Presets Windows nao sao vozes reais de producao. "
                 "Crie, importe ou selecione uma voz real."

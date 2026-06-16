@@ -145,6 +145,12 @@ def test_delete_preset_rejected(client):
     assert response.status_code in (404, 422)
 
 
+def test_legacy_windows_preset_aliases_are_not_resolvable_voices(client):
+    for voice_id in ("speaker_1", "speaker_2", "preset_windows_1"):
+        response = client.get(f"/api/tts/voices/{voice_id}")
+        assert response.status_code == 404
+
+
 def test_delete_voice_in_use_blocked(client, fake_builder):
     voice = _upload(client).json()["voice"]
     with voice_profiles.voice_in_use([voice["id"]]):
@@ -220,10 +226,7 @@ def test_custom_voice_never_calls_sapi(client, fake_builder, monkeypatch):
 
     voice = _upload(client).json()["voice"]
 
-    def sapi_must_not_run(*args, **kwargs):
-        raise AssertionError("SAPI5 foi chamado com voz personalizada selecionada!")
-
-    monkeypatch.setattr(tts, "_voice_reference_waveform", sapi_must_not_run)
+    assert not hasattr(tts, "_voice_reference_waveform")
     monkeypatch.setattr(tts, "get_model_revision", lambda mk="tts_1_5b": "rev-teste")
     tts._voice_embeds_cache.clear()
 
