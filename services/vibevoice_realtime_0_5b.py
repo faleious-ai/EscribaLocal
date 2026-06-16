@@ -292,9 +292,14 @@ def generate_voice_stream_0_5b(
         )
 
     engine = payload.get("engine") or {}
+    engine_key = engine.get("engine_key")
+    if not engine_key:
+        raise RealtimeUnavailableError(
+            "VibeVoice Realtime 0.5B indisponivel: worker isolado nao declarou engine_key."
+        )
     if status_callback:
         status_callback(_engine_metadata(
-            engine.get("engine_key", "realtime_0_5b"),
+            engine_key,
             engine.get("engine_label", "VibeVoice-Realtime-0.5B"),
             bool(engine.get("fallback", False)),
             worker=payload.get("worker"),

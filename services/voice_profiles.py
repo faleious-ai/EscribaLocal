@@ -77,11 +77,6 @@ def resolve_voice_id(voice_id: Optional[str]) -> Optional[str]:
     return voice_id
 
 
-def is_preset(voice_id: str) -> bool:
-    """Compatibilidade para callers legados; presets nao existem em producao."""
-    return False
-
-
 def is_legacy_windows_voice_id(voice_id: Optional[str]) -> bool:
     return bool(_LEGACY_WINDOWS_VOICE_PATTERN.match(str(voice_id or "")))
 
@@ -202,7 +197,7 @@ class voice_in_use:
     """Marca a voz como em uso durante uma geração (bloqueia exclusão)."""
 
     def __init__(self, voice_ids: List[str]):
-        self.voice_ids = [v for v in voice_ids if v and not is_preset(v)]
+        self.voice_ids = [v for v in voice_ids if v]
 
     def __enter__(self):
         with _lock:

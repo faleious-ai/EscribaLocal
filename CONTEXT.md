@@ -8,8 +8,15 @@ O subsistema TTS deve seguir, nesta ordem:
 
 1. decisoes explicitas mais recentes do usuario;
 2. `docs/tts/ESCOPO_DECISOES_PLANO_TTS_ESCRIBALOCAL.md`;
-3. ADRs aceitos que nao contradigam esse escopo;
-4. instrucoes operacionais em `AGENTS.md` e `docs/agents/`.
+3. `docs/tts/EXECUTION_STATUS.md`;
+4. `docs/tts/gate-a-report.md` ou o relatorio do gate atual;
+5. ADRs aceitos que nao contradigam esse escopo;
+6. instrucoes operacionais em `AGENTS.md` e `docs/agents/`.
+
+Leia esses tres documentos de TTS em conjunto antes de planejar ou alterar o
+subsistema: o escopo define decisoes e sequencia, o ledger registra o estado
+auditavel das tarefas, e o relatorio do gate mostra o que foi validado,
+bloqueado ou movido para o proximo gate.
 
 ## Documentos historicos de TTS
 

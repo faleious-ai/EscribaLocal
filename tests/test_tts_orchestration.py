@@ -59,7 +59,6 @@ def test_tts_generation_does_not_pass_tags_to_engine(monkeypatch):
     captured = {}
 
     monkeypatch.setattr(voice_profiles, "get_default_voice_id", lambda: "voice-real")
-    monkeypatch.setattr(voice_profiles, "is_preset", lambda _voice_id: False)
 
     def fake_native(**kwargs):
         captured["text"] = kwargs["text"]

@@ -492,7 +492,7 @@ def _resolve_speaker_voice_map(
             raise VoiceUnavailableError(
                 "Crie, importe ou selecione uma voz real antes de gerar TTS."
             )
-        if voice_profiles.is_preset(mapping[number]):
+        if voice_profiles.is_legacy_windows_voice_id(mapping[number]):
             raise VoiceUnavailableError(
                 "Presets Windows não são vozes reais de produção. Crie, importe ou selecione uma voz real."
             )

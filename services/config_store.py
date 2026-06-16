@@ -15,7 +15,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -28,6 +28,28 @@ PROFILES_DIR = CONFIG_DIR / "profiles"
 
 _lock = threading.RLock()
 _settings_cache: Dict[str, Any] = {"settings": None, "mtime": None}
+
+_UUID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+_LEGACY_WINDOWS_VOICE_IDS = {
+    "preset_windows_1",
+    "preset_windows_2",
+    "preset_windows_3",
+    "preset_windows_4",
+    "speaker_1",
+    "speaker_2",
+    "speaker_3",
+    "speaker_4",
+}
+_VOICE_SELECTION_KEYS = (
+    "voice_id",
+    "default_voice_id",
+    "selected_voice_id",
+    "identity_voice_id",
+)
+_VOICE_MAP_KEYS = (
+    "speaker_voices",
+    "speaker_voice_map",
+)
 
 
 # ------------------------------------------------------------------ modelos
@@ -131,6 +153,104 @@ def _profile_path(slug: str) -> Path:
     return path
 
 
+def _single_unambiguous_real_voice_id() -> Optional[str]:
+    try:
+        from services import voice_profiles
+
+        voices = voice_profiles.list_voices().get("custom", [])
+        defaults = [voice["id"] for voice in voices if voice.get("is_default")]
+        if len(defaults) == 1:
+            return defaults[0]
+        if len(voices) == 1:
+            return voices[0]["id"]
+    except Exception as exc:
+        record_app_event(
+            "legacy_tts_voice_migration_lookup_failed",
+            error_message=str(exc)[:200],
+        )
+    return None
+
+
+def _real_voice_exists(voice_id: str) -> bool:
+    if not _UUID_PATTERN.match(str(voice_id or "")):
+        return False
+    try:
+        from services import voice_profiles
+
+        voice_profiles.get_voice(voice_id)
+        return True
+    except Exception:
+        return False
+
+
+def _migrate_voice_selection(value: Any, fallback_voice_id: Optional[str]) -> Tuple[Any, bool]:
+    if value in (None, ""):
+        return value, False
+    candidate = str(value).strip()
+    if candidate in _LEGACY_WINDOWS_VOICE_IDS:
+        return fallback_voice_id or "", True
+    if _real_voice_exists(candidate):
+        return candidate, False
+    return "", True
+
+
+def _migrate_tts_section(tts_section: Any, fallback_voice_id: Optional[str]) -> bool:
+    if not isinstance(tts_section, dict):
+        return False
+
+    changed = False
+    for key in _VOICE_SELECTION_KEYS:
+        if key not in tts_section:
+            continue
+        migrated, did_change = _migrate_voice_selection(tts_section.get(key), fallback_voice_id)
+        if did_change:
+            tts_section[key] = migrated
+            changed = True
+
+    for key in _VOICE_MAP_KEYS:
+        voice_map = tts_section.get(key)
+        if not isinstance(voice_map, dict):
+            continue
+        migrated_map: Dict[str, Any] = {}
+        for speaker, value in voice_map.items():
+            migrated, did_change = _migrate_voice_selection(value, fallback_voice_id)
+            changed = changed or did_change
+            if migrated:
+                migrated_map[str(speaker)] = migrated
+        if migrated_map != voice_map:
+            tts_section[key] = migrated_map
+            changed = True
+
+    return changed
+
+
+def _migrate_legacy_tts_voice_config(raw: Dict[str, Any]) -> bool:
+    """Remove selecoes antigas de voz Windows sem criar identidade falsa.
+
+    Campos reais existentes sao preservados. IDs legados ou inexistentes sao
+    substituidos apenas quando ha uma unica voz real inequivoca; caso contrario,
+    a selecao fica vazia para manter o TTS pendente/desabilitado.
+    """
+    fallback_voice_id = _single_unambiguous_real_voice_id()
+    changed = False
+    defaults = raw.get("defaults")
+    if isinstance(defaults, dict):
+        changed = _migrate_tts_section(defaults.get("tts"), fallback_voice_id) or changed
+    engine_params = raw.get("engine_params")
+    if isinstance(engine_params, dict):
+        changed = _migrate_tts_section(engine_params.get("tts"), fallback_voice_id) or changed
+    changed = _migrate_tts_section(raw.get("tts"), fallback_voice_id) or changed
+    return changed
+
+
+def _load_json_with_legacy_tts_migration(path: Path) -> Dict[str, Any]:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if _migrate_legacy_tts_voice_config(raw):
+        _atomic_write_json(path, raw)
+        record_app_event("legacy_tts_voice_config_migrated", path=str(path))
+    return raw
+
+
 # ----------------------------------------------------------------- settings
 
 def get_settings() -> SettingsModel:
@@ -147,7 +267,7 @@ def get_settings() -> SettingsModel:
             return _settings_cache["settings"]
 
         try:
-            raw = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+            raw = _load_json_with_legacy_tts_migration(SETTINGS_PATH)
             settings = SettingsModel.model_validate(raw)
         except (json.JSONDecodeError, ValidationError, OSError) as exc:
             backup = SETTINGS_PATH.with_suffix(".json.corrupted.bak")
@@ -165,7 +285,7 @@ def get_settings() -> SettingsModel:
             return settings
 
         _settings_cache["settings"] = settings
-        _settings_cache["mtime"] = mtime
+        _settings_cache["mtime"] = SETTINGS_PATH.stat().st_mtime
         return settings
 
 
@@ -209,7 +329,7 @@ def list_profiles() -> List[Dict[str, Any]]:
     profiles = []
     for path in sorted(PROFILES_DIR.glob("*.json")):
         try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
+            raw = _load_json_with_legacy_tts_migration(path)
             profile = ProfileModel.model_validate(raw)
             profiles.append({
                 "name": profile.name,
@@ -228,7 +348,7 @@ def get_profile(slug: str) -> Optional[ProfileModel]:
     path = _profile_path(slug)
     if not path.exists():
         return None
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw = _load_json_with_legacy_tts_migration(path)
     return ProfileModel.model_validate(raw)
 
 

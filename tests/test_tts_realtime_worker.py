@@ -68,6 +68,33 @@ def test_realtime_worker_missing_returns_structured_unavailable(monkeypatch):
     }
 
 
+def test_realtime_worker_success_without_engine_key_is_rejected(monkeypatch):
+    from services import vibevoice_realtime_0_5b as realtime
+
+    command = [
+        sys.executable,
+        "-c",
+        (
+            "import json,sys;"
+            "json.load(sys.stdin);"
+            "json.dump({"
+            "'ok': True,"
+            "'engine': {'engine_label': 'Legacy Worker', 'fallback': False},"
+            "'audio': {'format': 'pcm_s16le', 'sample_rate': 24000, 'data_hex': '01000200'},"
+            "'worker': {'transport': 'subprocess', 'protocol_version': 1, 'status': 'legacy-success'}"
+            "}, sys.stdout)"
+        ),
+    ]
+    monkeypatch.setattr(realtime, "_resolve_worker_command", lambda: command)
+
+    try:
+        list(realtime.generate_voice_stream_0_5b("Ola."))
+    except realtime.RealtimeUnavailableError as exc:
+        assert "engine_key" in str(exc)
+    else:
+        raise AssertionError("expected RealtimeUnavailableError")
+
+
 def test_tts_stream_reports_worker_unavailable_without_audio(client, monkeypatch):
     from services import vibevoice_realtime_0_5b as realtime
 

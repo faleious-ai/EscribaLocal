@@ -2,13 +2,14 @@ import re
 from pathlib import Path
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PRODUCTION_ROOTS = (
-    Path("main.py"),
-    Path("routers"),
-    Path("services"),
-    Path("workers"),
-    Path("scripts"),
-    Path("static"),
+    PROJECT_ROOT / "main.py",
+    PROJECT_ROOT / "routers",
+    PROJECT_ROOT / "services",
+    PROJECT_ROOT / "workers",
+    PROJECT_ROOT / "scripts",
+    PROJECT_ROOT / "static",
 )
 
 FORBIDDEN_RUNTIME_PATTERNS = {
@@ -40,6 +41,6 @@ def test_tts_production_runtime_has_no_forbidden_audio_paths():
         source = path.read_text(encoding="utf-8")
         for label, pattern in FORBIDDEN_RUNTIME_PATTERNS.items():
             if pattern.search(source):
-                hits.append(f"{path}: {label}")
+                hits.append(f"{path.relative_to(PROJECT_ROOT)}: {label}")
 
     assert hits == []
