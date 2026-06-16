@@ -61,6 +61,36 @@ def test_large_rejects_known_insufficient_vram_before_loading(monkeypatch):
     assert "estrategia explicita" in message
 
 
+def test_large_requires_real_references_instead_of_artificial_prompts(monkeypatch):
+    class FakeCuda:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def get_device_properties(_index):
+            return type("Props", (), {"total_memory": 32_000_000_000})()
+
+    monkeypatch.setattr(tts.importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(tts, "torch", type("FakeTorch", (), {"cuda": FakeCuda})())
+
+    def fail_if_loaded(model_key):
+        raise AssertionError("Large loader should not run without real voice references")
+
+    monkeypatch.setattr(tts, "_get_direct_vibevoice_model", fail_if_loaded)
+
+    with pytest.raises(tts.LargeModelUnavailableError) as excinfo:
+        tts.generate_voice_1_5b_with_metadata(
+            text="Ola.",
+            speaker_id="speaker_1",
+            model_key="tts_large",
+        )
+
+    message = str(excinfo.value).lower()
+    assert "referencias reais" in message
+    assert "amostra artificial" in message
+
+
 def test_tts_generate_maps_large_preflight_error_to_clear_422(client, main_module, monkeypatch):
     def fake_generate(**_kwargs):
         raise tts.LargeModelUnavailableError(

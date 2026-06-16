@@ -1,10 +1,8 @@
-"""Biblioteca de vozes do VibeVoice TTS 1.5B.
+"""Biblioteca de vozes reais do VibeVoice TTS 1.5B.
 
 Perfis persistentes em ``data/voices/<uuid>/`` (profile.json, áudio original,
-reference.wav 24kHz mono, preview.wav e embeddings em CPU). Os presets locais
-são referências SAPI5 honestamente rotuladas ("Preset local — voz Windows N")
-e existem só em runtime; vozes personalizadas vêm de gravação/upload com
-consentimento explícito persistido.
+reference.wav 24kHz mono, preview.wav e embeddings em CPU). Vozes vêm de
+gravação/upload com consentimento explícito persistido.
 
 Privacidade: tudo local; logs nunca registram áudio, transcrição da amostra
 ou caminhos absolutos. IDs são UUIDs (nome nunca vira caminho físico).
@@ -38,21 +36,7 @@ MIN_DURATION_SECONDS = 0.5
 EMBEDDINGS_FILENAME = "vibevoice_1_5b.pt"
 
 _UUID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-
-# Presets locais: referências SAPI5 (voz do Windows) rotuladas com honestidade.
-# Mantêm compatibilidade com speaker_1..4 e somem da lista de "personalizadas".
-PRESET_VOICES: List[Dict[str, Any]] = [
-    {"id": "preset_windows_1", "name": "Preset local — voz Windows 1 (masculina)",
-     "speaker_hint": "speaker_1"},
-    {"id": "preset_windows_2", "name": "Preset local — voz Windows 2 (feminina)",
-     "speaker_hint": "speaker_2"},
-    {"id": "preset_windows_3", "name": "Preset local — voz Windows 3 (masculina)",
-     "speaker_hint": "speaker_3"},
-    {"id": "preset_windows_4", "name": "Preset local — voz Windows 4 (feminina)",
-     "speaker_hint": "speaker_4"},
-]
-PRESET_IDS = {preset["id"] for preset in PRESET_VOICES}
-_LEGACY_SPEAKER_TO_PRESET = {preset["speaker_hint"]: preset["id"] for preset in PRESET_VOICES}
+_LEGACY_WINDOWS_VOICE_PATTERN = re.compile(r"^(preset_windows_[1-4]|speaker_[1-4])$")
 
 _lock = threading.RLock()
 _in_use: Dict[str, int] = {}
@@ -87,14 +71,19 @@ def set_embedding_builder(builder: Callable[[str], Tuple[Any, str]],
 # ------------------------------------------------------------------ caminhos
 
 def resolve_voice_id(voice_id: Optional[str]) -> Optional[str]:
-    """speaker_1..4 (legado) -> preset; UUID/preset passam direto."""
+    """Retorna o identificador como recebido; aliases legados nao resolvem voz."""
     if not voice_id:
         return None
-    return _LEGACY_SPEAKER_TO_PRESET.get(voice_id, voice_id)
+    return voice_id
 
 
 def is_preset(voice_id: str) -> bool:
-    return voice_id in PRESET_IDS
+    """Compatibilidade para callers legados; presets nao existem em producao."""
+    return False
+
+
+def is_legacy_windows_voice_id(voice_id: Optional[str]) -> bool:
+    return bool(_LEGACY_WINDOWS_VOICE_PATTERN.match(str(voice_id or "")))
 
 
 def _voice_dir(voice_id: str) -> Path:
@@ -197,9 +186,6 @@ def list_voices() -> Dict[str, Any]:
 
 def get_voice(voice_id: str) -> Dict[str, Any]:
     voice_id = resolve_voice_id(voice_id)
-    if is_preset(voice_id):
-        preset = next(p for p in PRESET_VOICES if p["id"] == voice_id)
-        return {**preset, "is_preset": True, "source": "sapi5", "language": "pt-BR"}
     return _public(_load_profile(voice_id))
 
 
@@ -521,8 +507,6 @@ def set_default(voice_id: str) -> Dict[str, Any]:
 
 
 def delete_voice(voice_id: str) -> Dict[str, Any]:
-    if is_preset(resolve_voice_id(voice_id)):
-        raise InvalidVoice("Presets locais não podem ser excluídos.")
     _load_profile(voice_id)  # 404 se não existir
     if is_in_use(voice_id):
         raise VoiceInUse("Esta voz está sendo usada por uma geração em andamento; tente de novo em instantes.")

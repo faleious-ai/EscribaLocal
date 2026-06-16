@@ -66,6 +66,30 @@ def test_tts_service_rejects_sapi5_failure_policy_before_generation(monkeypatch)
     assert "failure_policy" in str(excinfo.value)
 
 
+def test_tts_generate_rejects_audio_from_unrequested_engine(client, main_module, monkeypatch):
+    def wrong_engine(**kwargs):
+        return {
+            "wav_bytes": b"RIFFfake",
+            "engine_key": "sapi5",
+            "engine_label": "SAPI5",
+            "fallback": True,
+        }
+
+    monkeypatch.setattr(main_module, "generate_voice_1_5b_with_metadata", wrong_engine)
+
+    response = client.post(
+        "/api/tts/generate",
+        data={
+            "text": "Ola.",
+            "tts_model": "tts_1_5b",
+            "voice_id": "11111111-2222-3333-4444-555555555555",
+        },
+    )
+
+    assert response.status_code == 502
+    assert "engine" in response.json()["detail"].lower()
+
+
 def test_voice_library_ui_does_not_offer_sapi5_failure_policy():
     source = Path("static/js/voice_library.js").read_text(encoding="utf-8")
 

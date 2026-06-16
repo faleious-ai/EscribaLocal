@@ -257,7 +257,7 @@ def test_worker_healthcheck_reports_probe_failure_when_native_enabled(monkeypatc
     assert payload["worker"]["native_probe"]["status"] == "config-load-failed"
 
 
-def test_worker_healthcheck_reports_smoke_capability_when_enabled(monkeypatch):
+def test_worker_healthcheck_does_not_report_synthetic_smoke_capability(monkeypatch):
     import workers.vibevoice_realtime_worker as worker
 
     monkeypatch.setenv("ESCRIBA_REALTIME_NATIVE_ENABLE", "1")
@@ -289,7 +289,6 @@ def test_worker_healthcheck_reports_smoke_capability_when_enabled(monkeypatch):
         "native_probe": True,
         "deep_native_probe": False,
         "synthesize_stream": False,
-        "synthetic_smoke": True,
     }
 
 
@@ -326,7 +325,6 @@ def test_worker_healthcheck_reports_deep_probe_capability_when_enabled(monkeypat
         "native_probe": True,
         "deep_native_probe": True,
         "synthesize_stream": False,
-        "synthetic_smoke": False,
     }
     assert payload["worker"]["native_probe"]["status"] == "processor-loaded"
     assert payload["worker"]["native_probe"]["processor_class"] == "FakeProcessor"
@@ -362,7 +360,7 @@ def test_worker_synthesize_unavailable_surfaces_probe_reason(monkeypatch):
     assert "vibevoice_streaming" in payload["error"]["message"]
 
 
-def test_worker_synthesize_returns_synthetic_smoke_audio_when_enabled(monkeypatch):
+def test_worker_synthesize_returns_unavailable_even_when_synthetic_smoke_was_requested(monkeypatch):
     import workers.vibevoice_realtime_worker as worker
 
     monkeypatch.setenv("ESCRIBA_REALTIME_NATIVE_ENABLE", "1")
@@ -388,12 +386,10 @@ def test_worker_synthesize_returns_synthetic_smoke_audio_when_enabled(monkeypatc
         "model_id": "microsoft/VibeVoice-Realtime-0.5B",
     })
 
-    assert payload["ok"] is True
-    assert payload["worker"]["status"] == "synthetic-smoke"
-    assert payload["worker"]["smoke"]["synthetic"] is True
-    assert payload["audio"]["format"] == "pcm_s16le"
-    assert payload["audio"]["sample_rate"] == 24000
-    assert payload["audio"]["data_hex"]
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "tts_realtime_unavailable"
+    assert "audio" not in payload
+    assert payload["worker"]["status"] == "config-loaded"
 
 
 def test_worker_probe_loads_processor_when_deep_probe_enabled(monkeypatch):
@@ -456,7 +452,7 @@ def test_worker_probe_loads_processor_when_deep_probe_enabled(monkeypatch):
     assert entered == ["patched", "enter", "exit"]
 
 
-def test_realtime_worker_client_accepts_synthetic_smoke_audio(monkeypatch):
+def test_realtime_worker_client_rejects_synthetic_smoke_audio(monkeypatch):
     from services import vibevoice_realtime_0_5b as realtime
 
     command = [
@@ -476,11 +472,15 @@ def test_realtime_worker_client_accepts_synthetic_smoke_audio(monkeypatch):
     ]
     monkeypatch.setattr(realtime, "_resolve_worker_command", lambda: command)
 
-    result = realtime.generate_voice_realtime_wav_with_metadata("Ola.")
+    try:
+        realtime.generate_voice_realtime_wav_with_metadata("Ola.")
+    except realtime.RealtimeUnavailableError as exc:
+        payload = exc.to_payload()
+    else:
+        raise AssertionError("expected RealtimeUnavailableError")
 
-    assert result["worker"]["status"] == "synthetic-smoke"
-    assert result["worker"]["smoke"]["synthetic"] is True
-    assert result["wav_bytes"].startswith(b"RIFF")
+    assert payload["code"] == "tts_realtime_unavailable"
+    assert "sintetico" in payload["message"].lower()
 
 
 def test_realtime_worker_client_records_basic_telemetry(monkeypatch):

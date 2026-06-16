@@ -1,6 +1,6 @@
 """Diagnóstico round-trip do VibeVoice TTS 1.5B em PT-BR.
 
-Gate objetivo: gera frases curtas com o modelo REAL (sem SAPI5/seno),
+Gate objetivo: gera frases curtas com o modelo REAL,
 transcreve de volta com o Whisper large-v3-turbo e compara com a entrada.
 Telemetria completa por tentativa (frames, EOS, motivo de parada, RMS...).
 
@@ -100,25 +100,6 @@ def load_voice_reference(path: Path, start_seconds: float, max_seconds: float) -
     return audio.astype(np.float32)
 
 
-def sapi_voice_reference() -> np.ndarray:
-    """Amostra de FALA limpa em PT-BR via SAPI5 (24kHz mono) como referência
-    de clonagem padronizada. É fala sintética clara — não é tom senoidal."""
-    import win32com.client
-
-    sapi = win32com.client.Dispatch("SAPI.SpVoice")
-    for voice in sapi.GetVoices():
-        description = voice.GetDescription()
-        if "Portuguese" in description or "Maria" in description:
-            sapi.Voice = voice
-            break
-    stream = win32com.client.Dispatch("SAPI.SpMemoryStream")
-    stream.Format.Type = 30  # SPSF_24kHz16BitMono
-    sapi.AudioOutputStream = stream
-    sapi.Speak("Esta é uma amostra de voz para clonagem. A fala gerada deve soar clara e natural.")
-    pcm = np.frombuffer(bytes(stream.GetData()), dtype=np.int16)
-    return (pcm.astype(np.float32) / 32768.0)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cap", type=int, default=512)
@@ -136,11 +117,12 @@ def main() -> None:
     voice_audio = None
     voice_label = "(sem condicionamento)"
     if not args.no_voice:
-        if args.voice == "sapi":
-            voice_audio = sapi_voice_reference()
-            voice_label = "SAPI5 pt-BR (fala sintética limpa)"
+        if args.voice:
+            voice_path = Path(args.voice)
+            voice_audio = load_voice_reference(voice_path, args.voice_start, args.voice_len)
+            voice_label = f"{voice_path} (recorte {args.voice_start:.1f}s+{len(voice_audio)/SAMPLE_RATE:.1f}s)"
         else:
-            voice_path = Path(args.voice) if args.voice else find_default_voice()
+            voice_path = find_default_voice()
             if voice_path is None:
                 print("AVISO: nenhuma gravação de referência encontrada; rodando sem condicionamento.")
             else:

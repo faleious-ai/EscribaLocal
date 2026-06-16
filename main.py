@@ -715,7 +715,9 @@ async def tts_generate(
     from services import voice_profiles
 
     def _reject_preset_voice(candidate: str | None):
-        if candidate and voice_profiles.is_preset(voice_profiles.resolve_voice_id(candidate)):
+        if candidate and voice_profiles.is_legacy_windows_voice_id(
+            voice_profiles.resolve_voice_id(candidate)
+        ):
             raise HTTPException(
                 status_code=422,
                 detail="Presets Windows não são vozes reais de produção. Crie, importe ou selecione uma voz real.",
@@ -780,6 +782,21 @@ async def tts_generate(
                     failure_policy=failure_policy,
                     device=device,
                 )
+            )
+        executed_engine = voice_result.get("engine_key", tts_model)
+        if voice_result.get("fallback") or executed_engine != tts_model:
+            record_app_event(
+                "tts_generate_engine_mismatch_rejected",
+                requested_model=tts_model,
+                engine_key=executed_engine,
+                fallback=bool(voice_result.get("fallback")),
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "Engine executada não corresponde à engine solicitada ou indicou fallback; "
+                    "o áudio foi recusado."
+                ),
             )
         def _header_safe(value) -> str:
             # Headers HTTP precisam ser ASCII na prática: um travessão (U+2014)
