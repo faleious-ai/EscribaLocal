@@ -28,6 +28,8 @@ from services.job_execution import run_blocking_job
 from services.jobs import job_manager
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+CHATTERBOX_BASE_REPO_ID = "ResembleAI/chatterbox"
+CHATTERBOX_BASE_ALLOW_PATTERNS = ("ve.pt", "s3gen.pt")
 
 def _vibevoice_converted_dir() -> Path:
     hf_cache = get_hf_cache_dir()
@@ -205,6 +207,15 @@ def _repo_dir_for(spec: ModelSpec, repo_id: Optional[str] = None) -> Path:
     return _cache_base_for(spec) / _repo_dirname(repo_id or spec.repo_id)
 
 
+def _repo_roots(repo_dir: Path) -> List[Path]:
+    snapshots_dir = repo_dir / "snapshots"
+    if snapshots_dir.is_dir():
+        roots = [path for path in snapshots_dir.iterdir() if path.is_dir()]
+        if roots:
+            return roots
+    return [repo_dir]
+
+
 def _existing_repo_dir(spec: ModelSpec) -> Optional[Path]:
     """Pasta do repo no cache, considerando primário e espelhos."""
     for repo in (spec.repo_id, *spec.mirror_repo_ids):
@@ -228,6 +239,34 @@ def _dir_size_bytes(path: Path) -> int:
 
 
 _WEIGHT_SUFFIXES = (".safetensors", ".bin", ".pt", ".onnx")
+
+
+def _repo_has_required_files(repo_dir: Optional[Path], required_files: Tuple[str, ...]) -> bool:
+    if repo_dir is None or not repo_dir.is_dir():
+        return False
+    names = set(required_files)
+    found = set()
+    for root in _repo_roots(repo_dir):
+        for current_root, _dirs, files in os.walk(root):
+            for name in files:
+                if name in names:
+                    found.add(name)
+        if found == names:
+            return True
+    return found == names
+
+
+def _resolve_explicit_repo_files(
+    spec: ModelSpec,
+    repo_id: str,
+    patterns: Optional[Tuple[str, ...]] = None,
+) -> Tuple[int, List[str]]:
+    from huggingface_hub import HfApi
+
+    info = HfApi().model_info(repo_id, files_metadata=True)
+    files = [s.rfilename for s in info.siblings if _matches_patterns(s.rfilename, patterns)]
+    total_bytes = sum((s.size or 0) for s in info.siblings if _matches_patterns(s.rfilename, patterns))
+    return total_bytes, files
 
 
 def get_install_status(spec: ModelSpec) -> Dict[str, Any]:
@@ -325,10 +364,21 @@ def get_install_status(spec: ModelSpec) -> Dict[str, Any]:
         "path": str(repo_dir),
         "partial": (not has_weights or incomplete) and size_mb > 0,
     }
-    
+
     if spec.id == "vibevoice-tts-1.5b":
         result["converted"] = False
-        
+    elif spec.id == "chatterbox-tts-pt-br":
+        base_repo_dir = _repo_dir_for(spec, CHATTERBOX_BASE_REPO_ID)
+        base_ready = _repo_has_required_files(base_repo_dir, CHATTERBOX_BASE_ALLOW_PATTERNS)
+        if base_repo_dir.is_dir():
+            result["size_on_disk_mb"] += round(_dir_size_bytes(base_repo_dir) / 1e6, 1)
+        if result["installed"] and not base_ready:
+            result["installed"] = False
+            result["partial"] = True
+            result["dependency_status"] = "missing-base-checkpoints"
+        else:
+            result["dependency_status"] = "ready" if base_ready else "missing-base-checkpoints"
+
     return result
 
 
@@ -369,6 +419,8 @@ def get_catalog_with_status() -> List[Dict[str, Any]]:
         else:
             if loaded:
                 state_str = "loaded"
+            elif status.get("dependency_status") == "missing-base-checkpoints" and status.get("size_on_disk_mb", 0) > 0:
+                state_str = "partial"
             elif status["installed"]:
                 state_str = "ready"
             elif status.get("partial"):
@@ -398,7 +450,9 @@ def get_catalog_with_status() -> List[Dict[str, Any]]:
             item["converted"] = bool(status.get("converted"))
             if status.get("conversion_failed"):
                 item["conversion_error"] = status.get("conversion_error")
-                
+        elif spec.id == "chatterbox-tts-pt-br":
+            item["dependency_status"] = status.get("dependency_status")
+
         catalog.append(item)
     return catalog
 
@@ -412,10 +466,13 @@ def delete_model(model_id: str) -> Dict[str, Any]:
     repo_dir = _existing_repo_dir(spec)
     
     output_dir = None
+    extra_repo_dir = None
     if spec.id == "vibevoice-tts-1.5b":
         output_dir = _vibevoice_converted_dir()
+    elif spec.id == "chatterbox-tts-pt-br":
+        extra_repo_dir = _repo_dir_for(spec, CHATTERBOX_BASE_REPO_ID)
         
-    if repo_dir is None and (output_dir is None or not output_dir.is_dir()):
+    if repo_dir is None and (output_dir is None or not output_dir.is_dir()) and (extra_repo_dir is None or not extra_repo_dir.is_dir()):
         raise FileNotFoundError(model_id)
         
     if _is_model_loaded(spec):
@@ -430,6 +487,9 @@ def delete_model(model_id: str) -> Dict[str, Any]:
     if output_dir and output_dir.is_dir():
         freed_mb += round(_dir_size_bytes(output_dir) / 1e6, 1)
         shutil.rmtree(output_dir)
+    if extra_repo_dir and extra_repo_dir.is_dir():
+        freed_mb += round(_dir_size_bytes(extra_repo_dir) / 1e6, 1)
+        shutil.rmtree(extra_repo_dir)
         
     _clean_stale_locks(spec)
     record_app_event("model_deleted", model_id=model_id, freed_mb=freed_mb)
@@ -462,11 +522,7 @@ def _resolve_repo_and_files(spec: ModelSpec) -> Tuple[str, int, List[str]]:
     last_error: Optional[Exception] = None
     for repo in (spec.repo_id, *spec.mirror_repo_ids):
         try:
-            from huggingface_hub import HfApi
-
-            info = HfApi().model_info(repo, files_metadata=True)
-            files = [s.rfilename for s in info.siblings if _matches_patterns(s.rfilename, spec.allow_patterns)]
-            total_bytes = sum((s.size or 0) for s in info.siblings if _matches_patterns(s.rfilename, spec.allow_patterns))
+            total_bytes, files = _resolve_explicit_repo_files(spec, repo, spec.allow_patterns)
             if repo != spec.repo_id:
                 record_app_event("model_repo_mirror_used", model_id=spec.id, repo=repo, primary=spec.repo_id)
             return repo, total_bytes, files
@@ -595,6 +651,27 @@ def _download_all_files(spec: ModelSpec, emit: Callable[[Dict[str, Any]], None],
             if cancel_event is not None and cancel_event.is_set():
                 raise JobCancelled()
             _download_file_interruptible(repo_used, filename, cache_dir, cancel_event)
+
+        if spec.id == "chatterbox-tts-pt-br":
+            base_total_bytes, base_files = _resolve_explicit_repo_files(
+                spec,
+                CHATTERBOX_BASE_REPO_ID,
+                CHATTERBOX_BASE_ALLOW_PATTERNS,
+            )
+            emit({
+                "type": "status",
+                "message": "Baixando dependencias base do Chatterbox (ve.pt, s3gen.pt)...",
+            })
+            base_repo_dir = _repo_dir_for(spec, CHATTERBOX_BASE_REPO_ID)
+            base_poller = _ProgressPoller(base_repo_dir, base_total_bytes, emit, "Chatterbox base")
+            base_poller.start()
+            try:
+                for filename in base_files:
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise JobCancelled()
+                    _download_file_interruptible(CHATTERBOX_BASE_REPO_ID, filename, cache_dir, cancel_event)
+            finally:
+                base_poller.stop()
     finally:
         poller.stop()
 

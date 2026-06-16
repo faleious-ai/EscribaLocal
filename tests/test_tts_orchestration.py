@@ -41,6 +41,17 @@ def test_orchestration_segments_preserve_speaker_and_voice_mapping():
     assert plan.segments[-1].voice_id == "voice-b"
 
 
+def test_orchestration_keeps_single_speaker_script_plain():
+    plan = orchestrate_tts(
+        "Bom dia. Este é um teste simples.",
+        default_speaker_id="speaker_1",
+    )
+
+    assert plan.engine_script == "Bom dia. Este é um teste simples."
+    assert len(plan.segments) == 1
+    assert plan.segments[0].speaker_number == "1"
+
+
 def test_tts_generation_does_not_pass_tags_to_engine(monkeypatch):
     from services import vibevoice_tts_1_5b as tts
     from services import voice_profiles

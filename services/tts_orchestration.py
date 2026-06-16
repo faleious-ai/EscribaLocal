@@ -174,6 +174,15 @@ def _collect_lines(text: str, default_speaker_id: str) -> List[tuple[str, str]]:
     return lines
 
 
+def _has_explicit_speaker_markup(text: str) -> bool:
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    return any(
+        _speaker_line_pattern.match(line.strip())
+        for line in normalized.split("\n")
+        if line.strip()
+    )
+
+
 def _strip_tags(text: str) -> tuple[str, Dict[str, str], List[Dict[str, str]]]:
     style: Dict[str, str] = {}
     tags: List[Dict[str, str]] = []
@@ -234,8 +243,13 @@ def orchestrate_tts(
                 style=style,
             ))
 
-    engine_script = "\n".join(
-        f"Speaker {segment.speaker_number}: {segment.text}"
-        for segment in segments if segment.text
-    )
+    unique_speakers = {segment.speaker_number for segment in segments if segment.text}
+    has_explicit_speakers = _has_explicit_speaker_markup(text)
+    if len(unique_speakers) <= 1 and not has_explicit_speakers:
+        engine_script = " ".join(segment.text for segment in segments if segment.text).strip()
+    else:
+        engine_script = "\n".join(
+            f"Speaker {segment.speaker_number}: {segment.text}"
+            for segment in segments if segment.text
+        )
     return TtsPlan(engine_script=engine_script, segments=segments, tags=all_tags)

@@ -38,19 +38,21 @@ if not exist ".venv\Scripts\activate.bat" (
 echo [2/4] Ativando ambiente virtual...
 call ".venv\Scripts\activate.bat"
 
+set CHATTERBOX_TTS_VERSION=0.1.7
+
 echo [3/4] Verificando instalacao do PyTorch e suporte CUDA GPU...
 python -c "import torch; exit(0 if torch.cuda.is_available() else 1)" 2>nul
 if %errorlevel% equ 0 (
     echo Suporte a GPU CUDA ja configurado no PyTorch.
     echo [3/4] Instalando/Atualizando demais dependencias...
     python -m pip install -r requirements.txt
-    python -m pip install chatterbox-tts --no-deps
+    python -m pip install chatterbox-tts==%CHATTERBOX_TTS_VERSION% --no-deps
 ) else (
     echo Instalando PyTorch com suporte a GPU NVIDIA CUDA...
     echo Isso pode levar alguns minutos dependendo da sua internet.
     python -m pip install torch --index-url https://download.pytorch.org/whl/cu121
     python -m pip install -r requirements.txt
-    python -m pip install chatterbox-tts --no-deps
+    python -m pip install chatterbox-tts==%CHATTERBOX_TTS_VERSION% --no-deps
 )
 
 echo [4/4] Inicializando o servidor FastAPI...

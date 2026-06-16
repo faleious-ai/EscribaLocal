@@ -880,10 +880,12 @@ def generate_voice_1_5b_with_metadata(
         raise ValueError(f"failure_policy inválida: {failure_policy}")
 
     from services.tts_orchestration import orchestrate_tts
+    orchestration_max_segment_chars = 320 if model_key == "chatterbox-tts-pt-br" else 500
     tts_plan = orchestrate_tts(
         text,
         default_speaker_id=speaker_id,
         speaker_voices=speaker_voices,
+        max_segment_chars=orchestration_max_segment_chars,
     )
     text = tts_plan.engine_script
 
@@ -907,6 +909,7 @@ def generate_voice_1_5b_with_metadata(
             speaker_voices=speaker_voices,
             speaker_id=speaker_id,
             speed=speed,
+            segment_texts=[segment.text for segment in tts_plan.segments if segment.text],
         )
 
     if device != "auto":

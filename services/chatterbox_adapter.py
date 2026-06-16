@@ -1,19 +1,21 @@
 import importlib.util
 import logging
 import os
-import tempfile
+import re
+from pathlib import Path
+from typing import Any, Dict, Optional, Sequence
+
 import numpy as np
-import scipy.io.wavfile as wavfile
 import torch
+import torch.nn.functional as F
+
 # Injetar fallbacks para dtypes float8 ausentes no PyTorch do Windows, evitando
-# falhas de importação de arquitetura Llama no transformers community.
+# falhas de importacao de arquitetura Llama no transformers community.
 if not hasattr(torch, "float8_e4m3fn"):
     torch.float8_e4m3fn = torch.float16
 if not hasattr(torch, "float8_e8m0fnu"):
     torch.float8_e8m0fnu = torch.float16
-from typing import Any, Dict, Optional
 
-from services.app_logging import record_exception_event
 from services.resource_arbiter import arbiter
 
 logger = logging.getLogger("EscribaLocal.ChatterboxAdapter")
@@ -21,6 +23,102 @@ logger = logging.getLogger("EscribaLocal.ChatterboxAdapter")
 
 class ChatterboxUnavailableError(RuntimeError):
     pass
+
+
+def _punc_norm(text: str) -> str:
+    if len(text) == 0:
+        return "You need to add some text for me to talk."
+
+    if text[0].islower():
+        text = text[0].upper() + text[1:]
+
+    text = " ".join(text.split())
+
+    replacements = [
+        ("...", ", "),
+        (":", ","),
+        (" - ", ", "),
+        (";", ", "),
+        (" ,", ","),
+    ]
+    for old_text, new_text in replacements:
+        text = text.replace(old_text, new_text)
+
+    text = text.rstrip(" ")
+    sentence_enders = {".", "!", "?", "-", ",", "、", "，", "。", "？", "！"}
+    if not any(text.endswith(punc) for punc in sentence_enders):
+        text += "."
+
+    return text
+
+
+class _LocalChatterboxRuntime:
+    def __init__(self, t3, s3gen, ve, tokenizer, device: str, sample_rate: int):
+        self.t3 = t3
+        self.s3gen = s3gen
+        self.ve = ve
+        self.tokenizer = tokenizer
+        self.device = device
+        self.sr = sample_rate
+
+    def _prepare_conditionals(self, audio_prompt_path: str, exaggeration: float):
+        import librosa
+        from chatterbox.models.s3tokenizer import S3_SR
+        from chatterbox.models.t3.modules.cond_enc import T3Cond
+
+        ref_24k_wav, _ = librosa.load(audio_prompt_path, sr=self.sr)
+        ref_16k_wav = librosa.resample(ref_24k_wav, orig_sr=self.sr, target_sr=S3_SR)
+
+        s3gen_ref_wav = ref_24k_wav[: 10 * self.sr]
+        ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, self.sr, device=self.device)
+
+        t3_cond_prompt_tokens = None
+        if plen := self.t3.hp.speech_cond_prompt_len:
+            s3_tokzr = self.s3gen.tokenizer
+            t3_cond_prompt_tokens, _ = s3_tokzr.forward([ref_16k_wav[: 6 * S3_SR]], max_len=plen)
+            t3_cond_prompt_tokens = torch.atleast_2d(t3_cond_prompt_tokens).to(self.device)
+
+        ve_embed = torch.from_numpy(self.ve.embeds_from_wavs([ref_16k_wav], sample_rate=S3_SR))
+        ve_embed = ve_embed.mean(axis=0, keepdim=True).to(self.device)
+
+        return T3Cond(
+            speaker_emb=ve_embed,
+            cond_prompt_speech_tokens=t3_cond_prompt_tokens,
+            emotion_adv=exaggeration * torch.ones(1, 1, 1),
+        ).to(device=self.device), ref_dict
+
+    def generate(self, text: str, audio_prompt_path: str, language_id: str = "pt", **_kwargs):
+        from chatterbox.models.s3tokenizer import drop_invalid_tokens
+
+        t3_cond, ref_dict = self._prepare_conditionals(audio_prompt_path, exaggeration=0.5)
+
+        text = _punc_norm(text)
+        text_tokens = self.tokenizer.text_to_tokens(
+            text,
+            language_id=language_id.lower() if language_id else None,
+        ).to(self.device)
+        text_tokens = torch.cat([text_tokens, text_tokens], dim=0)
+
+        text_tokens = F.pad(text_tokens, (1, 0), value=self.t3.hp.start_text_token)
+        text_tokens = F.pad(text_tokens, (0, 1), value=self.t3.hp.stop_text_token)
+
+        with torch.inference_mode():
+            speech_tokens = self.t3.inference(
+                t3_cond=t3_cond,
+                text_tokens=text_tokens,
+                max_new_tokens=1000,
+                temperature=0.8,
+                cfg_weight=0.5,
+                repetition_penalty=2.0,
+                min_p=0.05,
+                top_p=1.0,
+            )
+            speech_tokens = drop_invalid_tokens(speech_tokens[0]).to(self.device)
+            wav, _ = self.s3gen.inference(
+                speech_tokens=speech_tokens,
+                ref_dict=ref_dict,
+            )
+            return wav.squeeze(0).detach().cpu()
 
 
 class ChatterboxAdapter:
@@ -46,6 +144,83 @@ class ChatterboxAdapter:
             return "ResembleAI/Chatterbox-Multilingual-pt-br"
         return None
 
+    def _resolve_local_snapshot_dir(self, repo_dir: Path, missing_message: str) -> Path:
+        snapshots_dir = repo_dir / "snapshots"
+        if not snapshots_dir.is_dir():
+            raise ChatterboxUnavailableError(missing_message)
+        snapshots = [path for path in snapshots_dir.iterdir() if path.is_dir()]
+        if not snapshots:
+            raise ChatterboxUnavailableError(missing_message)
+        return snapshots[0]
+
+    def _chunk_texts_for_generation(
+        self,
+        text: str,
+        segment_texts: Optional[Sequence[str]] = None,
+        max_chars: int = 320,
+    ) -> list[str]:
+        def split_by_words(long_text: str) -> list[str]:
+            words = long_text.split()
+            pieces: list[str] = []
+            current = ""
+            for word in words:
+                candidate = f"{current} {word}".strip()
+                if current and len(candidate) > max_chars:
+                    pieces.append(current)
+                    current = word
+                else:
+                    current = candidate
+            if current:
+                pieces.append(current)
+            return pieces or [long_text]
+
+        base_segments = [segment.strip() for segment in (segment_texts or [text]) if segment and segment.strip()]
+        chunks: list[str] = []
+        for segment in base_segments:
+            if len(segment) <= max_chars:
+                chunks.append(segment)
+                continue
+
+            sentences = [
+                part.strip()
+                for part in re.split(r"(?<=[.!?;:])\s+", segment)
+                if part.strip()
+            ] or [segment]
+            current = ""
+            for sentence in sentences:
+                candidate = f"{current} {sentence}".strip()
+                if current and len(candidate) > max_chars:
+                    if len(current) > max_chars:
+                        chunks.extend(split_by_words(current))
+                    else:
+                        chunks.append(current)
+                    current = sentence
+                else:
+                    current = candidate
+            if current:
+                if len(current) > max_chars:
+                    chunks.extend(split_by_words(current))
+                else:
+                    chunks.append(current)
+        return chunks or [text.strip()]
+
+    def _try_import_runtime_class(self):
+        try:
+            from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+
+            return ChatterboxMultilingualTTS
+        except ImportError:
+            try:
+                from chatterbox.tts import ChatterboxTTS as ChatterboxMultilingualTTS
+
+                return ChatterboxMultilingualTTS
+            except ImportError as exc:
+                logger.warning(
+                    "Chatterbox: wrapper de runtime indisponivel; seguindo com loader local. Motivo: %s",
+                    exc,
+                )
+                return None
+
     def _ensure_model(self):
         if self.model is not None:
             return
@@ -57,116 +232,103 @@ class ChatterboxAdapter:
             )
 
         arbiter.prepare_load("tts_chatterbox")
-        
-        try:
-            from chatterbox.mtl_tts import ChatterboxMultilingualTTS
-        except ImportError:
-            try:
-                from chatterbox.tts import ChatterboxTTS as ChatterboxMultilingualTTS
-            except ImportError as exc:
-                raise ChatterboxUnavailableError(
-                    f"Chatterbox-TTS indisponivel: falha ao importar classes do pacote chatterbox: {exc}"
-                )
+
+        runtime_cls = self._try_import_runtime_class()
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
         self._device = device
-        
-        logger.info("Carregando Chatterbox PT-BR no device %s...", device)
-        from services.model_manager import get_spec, get_install_status
-        from pathlib import Path
-        
-        spec = get_spec("chatterbox-tts-pt-br")
-        
-        # Determinar se estamos sob teste mockado (verificando se a classe importada é um mock do pytest)
-        is_mock_test = not ChatterboxMultilingualTTS.__module__.startswith("chatterbox")
 
+        logger.info("Carregando Chatterbox PT-BR no device %s...", device)
+        from services.model_manager import (
+            CHATTERBOX_BASE_REPO_ID,
+            get_hf_cache_dir,
+            get_install_status,
+            get_spec,
+        )
+
+        spec = get_spec("chatterbox-tts-pt-br")
+
+        # Compatibilidade com testes mockados que substituem a classe real.
+        is_mock_test = runtime_cls is not None and not runtime_cls.__module__.startswith("chatterbox")
         if is_mock_test:
-            # Compatibilidade com os testes unitários mockados existentes
-            self.model = ChatterboxMultilingualTTS.from_pretrained(
-                spec.repo_id,
-                device=device
+            self.model = runtime_cls.from_pretrained(
+                repo_id=spec.repo_id,
+                device=device,
             )
             logger.info("Chatterbox PT-BR carregado com sucesso (modo compatibilidade mock/teste).")
             return
 
-        # Lógica de produção real para carregar o Single Language Pack do PT-BR local
         status = get_install_status(spec)
         if not status or not status.get("path"):
             raise ChatterboxUnavailableError("Modelo Chatterbox PT-BR nao instalado no cache.")
-        
-        repo_dir = Path(status["path"])
-        snapshots_dir = repo_dir / "snapshots"
-        snapshot_paths = list(snapshots_dir.iterdir())
-        if not snapshot_paths:
-            raise ChatterboxUnavailableError("Snapshots do Chatterbox PT-BR nao encontrados no cache.")
-        
-        pt_br_ckpt_dir = snapshot_paths[0]
-        
-        # O VoiceEncoder e o base do S3Gen (ve.pt e s3gen.pt) precisam ser carregados.
-        # Mas o Single Language Pack nao contem esses arquivos.
-        # Nós os baixamos do repo base ResembleAI/chatterbox de forma super leve e rápida
-        # usando snapshot_download!
-        from huggingface_hub import snapshot_download
-        try:
-            logger.info("Verificando arquivos base (ve.pt, s3gen.pt) de ResembleAI/chatterbox...")
-            base_ckpt_dir = Path(
-                snapshot_download(
-                    repo_id="ResembleAI/chatterbox",
-                    repo_type="model",
-                    revision="main",
-                    allow_patterns=["ve.pt", "s3gen.pt"],
-                    token=os.getenv("HF_TOKEN"),
-                )
-            )
-        except Exception as e:
+        if status.get("dependency_status") == "missing-base-checkpoints":
             raise ChatterboxUnavailableError(
-                f"Falha ao baixar dependencias base do Chatterbox: {e}"
+                "Dependencias base do Chatterbox ausentes no cache local. "
+                "Baixe novamente o modelo pelo painel para incluir ve.pt e s3gen.pt."
             )
-            
-        map_location = torch.device('cpu') if device in ["cpu", "mps"] else None
-        
+
+        pt_br_ckpt_dir = self._resolve_local_snapshot_dir(
+            Path(status["path"]),
+            "Snapshots do Chatterbox PT-BR nao encontrados no cache.",
+        )
+        base_repo_dir = Path(get_hf_cache_dir()) / ("models--" + CHATTERBOX_BASE_REPO_ID.replace("/", "--"))
+        base_ckpt_dir = self._resolve_local_snapshot_dir(
+            base_repo_dir,
+            "Dependencias base do Chatterbox ausentes no cache local. "
+            "Baixe novamente o modelo pelo painel para incluir ve.pt e s3gen.pt.",
+        )
+
+        map_location = torch.device("cpu") if device in ["cpu", "mps"] else None
+
         try:
-            from chatterbox.models.voice_encoder import VoiceEncoder
+            from chatterbox.models.s3gen import S3Gen
+            from chatterbox.models.s3gen import S3GEN_SR
             from chatterbox.models.t3 import T3
             from chatterbox.models.t3.modules.t3_config import T3Config
-            from chatterbox.models.s3gen import S3Gen
             from chatterbox.models.tokenizers import MTLTokenizer
+            from chatterbox.models.voice_encoder import VoiceEncoder
             from safetensors.torch import load_file as load_safetensors
-            
+
             logger.info("Carregando codificador de voz (VoiceEncoder)...")
             ve = VoiceEncoder()
             ve.load_state_dict(
                 torch.load(base_ckpt_dir / "ve.pt", map_location=map_location, weights_only=True)
             )
             ve.to(device).eval()
-            
-            logger.info("Carregando pesos T3 específicos do português brasileiro...")
+
+            logger.info("Carregando pesos T3 especificos do portugues brasileiro...")
             t3 = T3(T3Config.multilingual())
             t3_state = load_safetensors(pt_br_ckpt_dir / "t3_pt_br.safetensors")
-            if "model" in t3_state.keys():
+            if "model" in t3_state:
                 t3_state = t3_state["model"][0]
             t3.load_state_dict(t3_state)
             t3.to(device).eval()
-            
-            logger.info("Carregando vocodificador S3Gen v3 específico...")
+
+            logger.info("Carregando vocodificador S3Gen v3 especifico...")
             s3gen = S3Gen()
             s3gen_path = pt_br_ckpt_dir / "s3gen_v3.safetensors"
             if s3gen_path.exists():
                 s3gen_state = load_safetensors(s3gen_path)
             else:
-                s3gen_state = torch.load(pt_br_ckpt_dir / "s3gen_v3.pt", map_location=map_location, weights_only=True)
-                
-            if "model" in s3gen_state.keys():
+                s3gen_state = torch.load(
+                    pt_br_ckpt_dir / "s3gen_v3.pt",
+                    map_location=map_location,
+                    weights_only=True,
+                )
+            if "model" in s3gen_state:
                 s3gen_state = s3gen_state["model"][0]
-            s3gen.load_state_dict(s3gen_state)
+            s3gen.load_state_dict(s3gen_state, strict=False)
             s3gen.to(device).eval()
-            
+
             logger.info("Carregando tokenizador de grafemas...")
             tokenizer = MTLTokenizer(
                 str(pt_br_ckpt_dir / "grapheme_mtl_merged_expanded_v1.json")
             )
-            
-            self.model = ChatterboxMultilingualTTS(t3, s3gen, ve, tokenizer, device)
+
+            if runtime_cls is not None:
+                self.model = runtime_cls(t3, s3gen, ve, tokenizer, device)
+            else:
+                self.model = _LocalChatterboxRuntime(t3, s3gen, ve, tokenizer, device, S3GEN_SR)
             logger.info("Chatterbox PT-BR carregado com sucesso via loader local personalizado.")
         except Exception as exc:
             logger.error("Erro ao instanciar os componentes locais do Chatterbox: %s", exc)
@@ -179,94 +341,91 @@ class ChatterboxAdapter:
         speaker_voices: Optional[Dict[str, str]] = None,
         speaker_id: str = "speaker_1",
         speed: float = 1.0,
+        segment_texts: Optional[Sequence[str]] = None,
     ) -> Dict[str, Any]:
-        self._ensure_model()
-        
         from services import voice_profiles
-        from services.vibevoice_tts_1_5b import VoiceUnavailableError, _voice_reference_waveform, _wav_bytes_from_array
-        
+        from services.vibevoice_tts_1_5b import VoiceUnavailableError, _wav_bytes_from_array
+
         resolved_voice_id = None
         if speaker_voices and speaker_id:
             import re
-            m = re.search(r"([0-9]+)$", speaker_id)
-            num = m.group(1) if m else "1"
-            resolved_voice_id = speaker_voices.get(num)
-            
+
+            match = re.search(r"([0-9]+)$", speaker_id)
+            speaker_number = match.group(1) if match else "1"
+            resolved_voice_id = speaker_voices.get(speaker_number)
+
         if not resolved_voice_id:
             resolved_voice_id = voice_id
-            
         if not resolved_voice_id:
             resolved_voice_id = voice_profiles.get_default_voice_id()
-            
         if not resolved_voice_id:
-            raise VoiceUnavailableError("Nenhuma voz de referência foi selecionada ou encontrada para o Chatterbox.")
+            raise VoiceUnavailableError(
+                "Nenhuma voz de referencia foi selecionada ou encontrada para o Chatterbox."
+            )
 
-        resolved = voice_profiles.resolve_voice_id(resolved_voice_id)
-        
-        temp_paths = []
+        resolved_voice_id = voice_profiles.resolve_voice_id(resolved_voice_id)
+        if voice_profiles.is_preset(resolved_voice_id):
+            raise VoiceUnavailableError(
+                "Presets Windows nao sao vozes reais de producao. "
+                "Crie, importe ou selecione uma voz real."
+            )
+
         try:
-            if voice_profiles.is_preset(resolved):
-                preset_spec = next((p for p in voice_profiles.PRESET_VOICES if p["id"] == resolved), None)
-                if not preset_spec:
-                    raise VoiceUnavailableError(f"Preset {resolved} não encontrado.")
-                
-                speaker_hint = preset_spec["speaker_hint"]
-                waveform = _voice_reference_waveform(speaker_hint)
-                if waveform is None:
-                    raise VoiceUnavailableError(f"Preset {resolved} indisponível (SAPI5 não respondeu).")
-                
-                fd, temp_wav = tempfile.mkstemp(suffix=".wav")
-                os.close(fd)
-                temp_paths.append(temp_wav)
-                
-                wavfile.write(temp_wav, 24000, waveform)
-                ref_path = temp_wav
-            else:
-                try:
-                    _profile = voice_profiles.get_voice(resolved)
-                    ref_path = str(voice_profiles.reference_path(resolved))
-                    if not os.path.exists(ref_path):
-                        raise VoiceUnavailableError(f"Arquivo de voz {resolved} ausente no disco.")
-                except Exception as exc:
-                    raise VoiceUnavailableError(f"Voz {resolved} indisponível: {exc}")
+            voice_profiles.get_voice(resolved_voice_id)
+            ref_path = str(voice_profiles.reference_path(resolved_voice_id))
+            if not os.path.exists(ref_path):
+                raise VoiceUnavailableError(f"Arquivo de voz {resolved_voice_id} ausente no disco.")
+        except Exception as exc:
+            raise VoiceUnavailableError(f"Voz {resolved_voice_id} indisponivel: {exc}")
 
-            kwargs = {}
-            if hasattr(self.model, "generate"):
-                import inspect
-                sig = inspect.signature(self.model.generate)
-                if "language_id" in sig.parameters:
-                    kwargs["language_id"] = "pt"
-                elif "language" in sig.parameters:
-                    kwargs["language"] = "pt"
-                
-                audio_tensor = self.model.generate(
-                    text=text,
-                    audio_prompt_path=ref_path,
-                    **kwargs
-                )
-            else:
-                raise RuntimeError("O modelo Chatterbox não possui o método generate.")
+        self._ensure_model()
+        if not hasattr(self.model, "generate"):
+            raise RuntimeError("O modelo Chatterbox nao possui o metodo generate.")
 
+        import inspect
+
+        sig = inspect.signature(self.model.generate)
+        kwargs = {}
+        if "language_id" in sig.parameters:
+            kwargs["language_id"] = "pt"
+        elif "language" in sig.parameters:
+            kwargs["language"] = "pt"
+
+        sample_rate = getattr(self.model, "sr", 24000)
+        chunk_texts = self._chunk_texts_for_generation(text=text, segment_texts=segment_texts)
+        audio_chunks: list[np.ndarray] = []
+        silence = np.zeros(int(sample_rate * 0.18), dtype=np.float32)
+
+        for index, chunk_text in enumerate(chunk_texts):
+            audio_tensor = self.model.generate(
+                text=chunk_text,
+                audio_prompt_path=ref_path,
+                **kwargs,
+            )
             if isinstance(audio_tensor, torch.Tensor):
                 audio_np = audio_tensor.detach().cpu().numpy()
             else:
                 audio_np = np.array(audio_tensor)
-                
-            sample_rate = getattr(self.model, "sr", 24000)
-            wav_bytes = _wav_bytes_from_array(audio_np, sample_rate=sample_rate, speed=speed)
-            
-            return {
-                "wav_bytes": wav_bytes,
-                "engine_key": "chatterbox-tts-pt-br",
-                "engine_label": "Chatterbox PT-BR",
-                "fallback": False,
-            }
-        finally:
-            for p in temp_paths:
-                try:
-                    os.remove(p)
-                except OSError:
-                    pass
+
+            audio_np = np.asarray(audio_np, dtype=np.float32).reshape(-1)
+            if audio_np.size == 0:
+                continue
+            if index > 0:
+                audio_chunks.append(silence.copy())
+            audio_chunks.append(audio_np)
+
+        if not audio_chunks:
+            raise ChatterboxUnavailableError("Chatterbox-TTS nao retornou audio para nenhum segmento.")
+
+        merged_audio = np.concatenate(audio_chunks)
+        wav_bytes = _wav_bytes_from_array(merged_audio, sample_rate=sample_rate, speed=speed)
+
+        return {
+            "wav_bytes": wav_bytes,
+            "engine_key": "chatterbox-tts-pt-br",
+            "engine_label": "Chatterbox PT-BR",
+            "fallback": False,
+        }
 
 
 chatterbox_engine = ChatterboxAdapter()
