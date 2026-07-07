@@ -67,6 +67,36 @@ def test_install_detection(tmp_caches):
     assert "faster-whisper-tiny" in status["path"]
 
 
+def test_default_model_cache_dirs_are_inside_project_models():
+    expected = model_manager.PROJECT_ROOT / "models"
+    assert model_manager.get_model_storage_dir() == expected
+    assert model_manager.get_whisper_cache_dir() == expected
+    assert model_manager.get_hf_cache_dir() == expected
+
+
+def test_whisper_loader_uses_project_models_dir(monkeypatch):
+    import sys
+    import types
+
+    from services import transcriber
+
+    captured = {}
+
+    class FakeWhisperModel:
+        def __init__(self, *args, **kwargs):
+            captured["kwargs"] = kwargs
+
+    fake_module = types.SimpleNamespace(WhisperModel=FakeWhisperModel)
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake_module)
+    monkeypatch.setattr(transcriber.torch.cuda, "is_available", lambda: False)
+    transcriber.unload_whisper_model()
+
+    transcriber.get_whisper_model("tiny", "cpu", "int8")
+
+    assert Path(captured["kwargs"]["download_root"]) == model_manager.get_model_storage_dir()
+    transcriber.unload_whisper_model()
+
+
 
 
 
@@ -103,6 +133,19 @@ def test_download_already_installed_409(client, tmp_caches):
     _install_fake_whisper(tmp_caches["whisper"])
     response = client.post("/api/models/download", json={"model_id": "whisper-tiny"})
     assert response.status_code == 409
+
+
+def test_download_cleans_orphan_incomplete_files(tmp_caches):
+    spec = model_manager.get_spec("whisper-tiny")
+    repo_dir = tmp_caches["whisper"] / "models--Systran--faster-whisper-tiny"
+    blob_dir = repo_dir / "blobs"
+    blob_dir.mkdir(parents=True)
+    incomplete = blob_dir / "stalled.incomplete"
+    incomplete.write_bytes(b"")
+
+    model_manager._clean_stale_locks(spec)
+
+    assert not incomplete.exists()
 
 
 def _fake_resolver(repo_id="Systran/faster-whisper-tiny", files=("model.bin", "config.json")):

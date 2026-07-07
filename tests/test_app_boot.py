@@ -1,4 +1,6 @@
 """Lote 1 — testes de inicialização e contratos básicos da API."""
+import asyncio
+
 import pytest
 
 from tests.conftest import parse_sse_payloads
@@ -39,13 +41,49 @@ def test_logs_recent(client):
     assert isinstance(payload["lines"], list)
 
 
+def test_shutdown_unloads_registered_engines(main_module, monkeypatch):
+    calls = []
+
+    class FakeArbiter:
+        def unload_all(self):
+            calls.append("unload_all")
+            return ["whisper"]
+
+    monkeypatch.setattr(main_module, "gc", type("FakeGc", (), {"collect": staticmethod(lambda: calls.append("gc"))}))
+    monkeypatch.setattr(main_module.torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(main_module.torch.cuda, "empty_cache", lambda: calls.append("empty_cache"))
+    monkeypatch.setattr(main_module.torch.cuda, "ipc_collect", lambda: calls.append("ipc_collect"))
+    monkeypatch.setattr("services.resource_arbiter.arbiter", FakeArbiter())
+
+    asyncio.run(main_module.log_app_shutdown())
+
+    assert calls == ["unload_all", "gc", "empty_cache", "ipc_collect"]
+
+
 def test_runtime_patches_idempotent():
     from services.runtime_patches import apply_runtime_patches
+    import os
     import torch
 
     apply_runtime_patches()
     apply_runtime_patches()
     assert hasattr(torch, "float8_e8m0fnu")
+    assert os.environ["HF_HUB_DISABLE_XET"] == "1"
+
+
+def test_vibevoice_fork_patches_expose_generation_mixin(monkeypatch):
+    from services.runtime_patches import apply_runtime_patches
+    from services.transformers_loader import apply_vibevoice_fork_patches, use_custom_transformers
+
+    apply_runtime_patches()
+    with use_custom_transformers():
+        import transformers.generation as generation
+        from transformers.generation.utils import GenerationMixin
+
+        monkeypatch.delattr(generation, "GenerationMixin", raising=False)
+        apply_vibevoice_fork_patches()
+
+        assert generation.GenerationMixin is GenerationMixin
 
 
 def _fake_whisper_generator(**kwargs):

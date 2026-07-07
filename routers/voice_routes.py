@@ -191,14 +191,14 @@ async def validate_voice(voice_id: str):
         import tempfile
 
         from faster_whisper import WhisperModel
-        from pathlib import Path
+        from services.model_manager import get_whisper_cache_dir
 
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp.write(result["wav_bytes"])
             wav_path = tmp.name
         try:
             whisper = WhisperModel("large-v3-turbo", device="cpu", compute_type="int8",
-                                   download_root=str(Path.home() / ".cache" / "whisper-models"))
+                                   download_root=str(get_whisper_cache_dir()))
             segments, info = whisper.transcribe(wav_path, beam_size=5,
                                                 vad_filter=True, language="pt")
             transcript = " ".join(s.text.strip() for s in segments).strip()

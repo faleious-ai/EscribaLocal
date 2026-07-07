@@ -172,6 +172,24 @@ async def log_app_startup():
                 name="browser-open"
             ).start()
 
+
+@app.on_event("shutdown")
+async def log_app_shutdown():
+    unloaded = []
+    try:
+        from services.resource_arbiter import arbiter
+
+        unloaded = arbiter.unload_all()
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+    except Exception as exc:
+        record_exception_event("app_shutdown_cleanup_error", exc)
+    finally:
+        record_app_event("app_shutdown", unloaded_engines=unloaded)
+
+
 @app.get("/api/system-status")
 async def get_system_status():
     """

@@ -1,4 +1,3 @@
-import os
 import gc
 import logging
 import threading
@@ -188,13 +187,15 @@ def get_whisper_model(model_name: str, device: str, compute_type: str, cpu_threa
         from services.resource_arbiter import arbiter
         arbiter.prepare_load("whisper", est_vram_mb=_estimate_whisper_vram_mb(model_name, compute_type))
 
+    from services.model_manager import get_whisper_cache_dir
+
     # Inicializa o modelo
     # Para o Windows, passamos cpu_threads apropriadas
     model = WhisperModel(
         model_size_or_path=model_name,
         device=device,
         compute_type=compute_type,
-        download_root=os.path.join(os.path.expanduser("~"), ".cache", "whisper-models"),
+        download_root=str(get_whisper_cache_dir()),
         num_workers=4,          # Permite rodar múltiplas decodificações concorrentes na GPU
         cpu_threads=cpu_threads # Distribui a carga de CPU nos núcleos disponíveis
     )

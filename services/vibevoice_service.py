@@ -32,6 +32,7 @@ def get_vibevoice_model_and_processor():
 
     with use_standard_transformers():
         from transformers import AutoProcessor, VibeVoiceAsrForConditionalGeneration
+        from services.model_manager import get_hf_cache_dir
 
         logger.info(f"Carregando VibeVoice-ASR-HF ({_vibevoice_model_id})...")
         cuda_available = torch.cuda.is_available()
@@ -58,9 +59,15 @@ def get_vibevoice_model_and_processor():
             except Exception as quant_err:
                 logger.warning(f"Quantização 4-bit indisponível; carregando VibeVoice sem quantização: {quant_err}")
 
-        _vibevoice_processor = AutoProcessor.from_pretrained(_vibevoice_model_id, trust_remote_code=True)
+        hf_cache_dir = str(get_hf_cache_dir())
+        _vibevoice_processor = AutoProcessor.from_pretrained(
+            _vibevoice_model_id,
+            trust_remote_code=True,
+            cache_dir=hf_cache_dir,
+        )
         _vibevoice_model = VibeVoiceAsrForConditionalGeneration.from_pretrained(
             _vibevoice_model_id,
+            cache_dir=hf_cache_dir,
             **model_kwargs
         )
         if not cuda_available:

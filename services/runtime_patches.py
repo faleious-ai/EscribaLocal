@@ -6,6 +6,9 @@ Todos os módulos que dependem destes patches devem chamar
 ``apply_runtime_patches()`` no momento do import — a função é idempotente.
 """
 import logging
+import os
+import importlib
+import types
 
 logger = logging.getLogger("EscribaLocal.RuntimePatches")
 
@@ -18,8 +21,23 @@ def apply_runtime_patches() -> None:
     if _applied:
         return
     _applied = True
+    _patch_huggingface_download_backend()
     _patch_torch_float8()
     _patch_bitsandbytes_params4bit()
+    _patch_numpy_core_alias()
+
+
+def _patch_huggingface_download_backend() -> None:
+    # O backend Xet do HuggingFace pode ficar preso em downloads grandes no
+    # Windows/Drive, deixando blobs .incomplete sem progresso. O caminho HTTP
+    # tradicional e mais previsivel para o gerenciador de downloads do app.
+    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+    try:
+        from huggingface_hub import constants
+
+        constants.HF_HUB_DISABLE_XET = True
+    except Exception:
+        return
 
 
 def _patch_torch_float8() -> None:
@@ -30,6 +48,21 @@ def _patch_torch_float8() -> None:
     if not hasattr(torch, "float8_e8m0fnu"):
         setattr(torch, "float8_e8m0fnu", torch.float32)
         logger.info("Patch aplicado: torch.float8_e8m0fnu -> torch.float32")
+
+
+def _patch_numpy_core_alias() -> None:
+    # accelerate 1.8.x pode escolher numpy._core quando detecta numpy >= 2,
+    # mas neste ambiente o numpy expõe apenas numpy.core. O alias evita que o
+    # import de accelerate fique parcialmente inicializado e quebre o TTS.
+    import numpy as np
+
+    if not hasattr(np, "_core"):
+        setattr(np, "_core", types.SimpleNamespace())
+        logger.info("Patch aplicado: numpy._core criado")
+    if not hasattr(np._core, "multiarray"):
+        multiarray = importlib.import_module("numpy.core.multiarray")
+        setattr(np._core, "multiarray", multiarray)
+        logger.info("Patch aplicado: numpy._core.multiarray -> numpy.core.multiarray")
 
 
 def _patch_bitsandbytes_params4bit() -> None:

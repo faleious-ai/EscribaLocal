@@ -2,6 +2,7 @@
 .venv/
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Dados de runtime (gerados pela aplicacao; nunca versionar)
 temp_uploads/

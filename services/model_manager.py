@@ -26,8 +26,12 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 from services.app_logging import record_app_event, record_exception_event
 from services.job_execution import run_blocking_job
 from services.jobs import job_manager
+from services.runtime_patches import apply_runtime_patches
+
+apply_runtime_patches()
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+MODEL_STORAGE_DIR = PROJECT_ROOT / "models"
 CHATTERBOX_BASE_REPO_ID = "ResembleAI/chatterbox"
 CHATTERBOX_BASE_ALLOW_PATTERNS = ("ve.pt", "s3gen.pt")
 
@@ -184,15 +188,16 @@ def get_whisper_spec(whisper_size: str) -> Optional[ModelSpec]:
 
 # ------------------------------------------------------------------ caches
 
+def get_model_storage_dir() -> Path:
+    return MODEL_STORAGE_DIR
+
+
 def get_whisper_cache_dir() -> Path:
-    # Mesmo diretório que o transcriber sempre usou.
-    return Path(os.path.expanduser("~")) / ".cache" / "whisper-models"
+    return get_model_storage_dir()
 
 
 def get_hf_cache_dir() -> Path:
-    from huggingface_hub.constants import HF_HUB_CACHE
-
-    return Path(HF_HUB_CACHE)
+    return get_model_storage_dir()
 
 
 def _cache_base_for(spec: ModelSpec) -> Path:
@@ -507,6 +512,24 @@ def _clean_stale_locks(spec: ModelSpec) -> None:
                 record_app_event("model_stale_locks_removed", model_id=spec.id, path=str(lock_dir))
             except OSError as exc:
                 record_app_event("model_stale_locks_error", model_id=spec.id, error_message=str(exc))
+
+        repo_dir = _repo_dir_for(spec, repo)
+        if repo_dir.is_dir():
+            for incomplete_file in repo_dir.rglob("*.incomplete"):
+                try:
+                    incomplete_file.unlink()
+                    record_app_event(
+                        "model_orphan_incomplete_removed",
+                        model_id=spec.id,
+                        path=str(incomplete_file),
+                    )
+                except OSError as exc:
+                    record_app_event(
+                        "model_orphan_incomplete_error",
+                        model_id=spec.id,
+                        path=str(incomplete_file),
+                        error_message=str(exc),
+                    )
 
 
 # ---------------------------------------------------------------- download

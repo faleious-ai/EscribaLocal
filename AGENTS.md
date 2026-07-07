@@ -4,6 +4,21 @@ Sempre se comunique com o usuário em português do Brasil (pt-BR), inclusive em
 
 ## Configuração do projeto
 
+### Regime de trabalho Git
+
+Decisão operacional vigente: todo trabalho deve acontecer diretamente em
+`main`. Não crie branches de trabalho, branches `codex/*` ou branches paralelas
+sem uma instrução explícita posterior do usuário revogando esta decisão.
+
+Se encontrar trabalho em outra branch, consolide-o em `main` antes de
+continuar, preservando alterações locais e sem descartar commits. Depois da
+consolidação local, remova a branch paralela local quando ela não for mais
+necessária.
+
+Mesmo trabalhando em `main`, continue respeitando as proteções deste arquivo:
+não faça commit, push, merge remoto, rebase, release, deploy ou alterações
+remotas sem autorização explícita.
+
 ### Skills e ambiente do agente
 
 Este repositório versiona:

@@ -120,6 +120,8 @@ def apply_vibevoice_fork_patches() -> None:
        modelo é construído com um Qwen2 default (hidden 4096) e os pesos do
        checkpoint (hidden 1536) não encaixam (size mismatch no embedding).
     """
+    import transformers.generation as generation
+    from transformers.generation.utils import GenerationMixin
     from transformers.models.vibevoice_acoustic_tokenizer.configuration_vibevoice_acoustic_tokenizer import (
         VibeVoiceAcousticTokenizerConfig,
     )
@@ -127,6 +129,9 @@ def apply_vibevoice_fork_patches() -> None:
         VibeVoiceConfig,
         VibeVoiceDiffusionHeadConfig,
     )
+
+    if not hasattr(generation, "GenerationMixin"):
+        setattr(generation, "GenerationMixin", GenerationMixin)
 
     if not getattr(VibeVoiceAcousticTokenizerConfig, "_escriba_decoder_depths_patched", False):
         VibeVoiceAcousticTokenizerConfig.decoder_depths = (

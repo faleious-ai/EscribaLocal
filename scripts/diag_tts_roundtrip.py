@@ -247,9 +247,10 @@ def main() -> None:
 
     print("\ncarregando whisper large-v3-turbo (cpu/int8) para o round-trip...")
     from faster_whisper import WhisperModel
+    from services.model_manager import get_whisper_cache_dir
 
     whisper = WhisperModel("large-v3-turbo", device="cpu", compute_type="int8",
-                           download_root=str(Path.home() / ".cache" / "whisper-models"))
+                           download_root=str(get_whisper_cache_dir()))
 
     if voice_audio is not None:
         ref_segments, ref_info = whisper.transcribe(str(OUT_DIR / "referencia_voz.wav"),

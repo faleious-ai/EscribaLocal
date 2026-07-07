@@ -145,11 +145,12 @@ def _load_native_model(model_key: str, device_preference: str = "auto"):
                 arbiter.prepare_load(model_key)
             with use_custom_transformers():
                 from transformers import AutoModelForTextToWaveform, AutoProcessor
+                from services.model_manager import get_hf_cache_dir
 
                 logger.info("Carregando VibeVoice TTS nativo (%s) em %s...", source, device_label)
-                processor = AutoProcessor.from_pretrained(source)
+                processor = AutoProcessor.from_pretrained(source, cache_dir=str(get_hf_cache_dir()))
                 model = AutoModelForTextToWaveform.from_pretrained(
-                    source, dtype=torch.bfloat16,
+                    source, dtype=torch.bfloat16, cache_dir=str(get_hf_cache_dir()),
                 ).to(device_label).eval()
 
             import copy
@@ -322,9 +323,13 @@ def _get_direct_vibevoice_model(model_key: str):
         model_kwargs["device_map"] = "auto"
 
     try:
-        processor = VibeVoiceProcessor.from_pretrained(model_id)
+        from services.model_manager import get_hf_cache_dir
+
+        hf_cache_dir = str(get_hf_cache_dir())
+        processor = VibeVoiceProcessor.from_pretrained(model_id, cache_dir=hf_cache_dir)
         model = VibeVoiceForConditionalGenerationInference.from_pretrained(
             model_id,
+            cache_dir=hf_cache_dir,
             **model_kwargs,
         )
     except Exception as exc:
