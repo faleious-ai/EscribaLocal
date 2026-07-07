@@ -233,6 +233,25 @@ async def get_style_reference_audio(voice_id: str, style_id: str):
     return FileResponse(str(path), media_type="audio/wav")
 
 
+@router.get("/voices/{voice_id}/styles/{style_id}/original")
+async def get_style_original_audio(voice_id: str, style_id: str):
+    try:
+        path = voice_profiles.style_original_path(voice_id, style_id)
+    except voice_profiles.VoiceNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Original de estilo nÃ£o encontrado.")
+    return FileResponse(str(path), media_type="audio/wav")
+
+
+@router.delete("/voices/{voice_id}/styles/{style_id}/reference")
+async def delete_style_reference(voice_id: str, style_id: str):
+    try:
+        return voice_profiles.clear_style_reference(voice_id, style_id)
+    except Exception as exc:
+        raise _http_error(exc)
+
+
 @router.delete("/voices/{voice_id}")
 async def delete_voice(voice_id: str):
     try:

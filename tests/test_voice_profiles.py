@@ -593,3 +593,50 @@ def test_style_instruction_and_parameters_roundtrip(client, fake_builder, isolat
     )
     assert persisted["instruction"] == "Reduza a energia e mantenha a narracao uniforme."
     assert persisted["parameters"] == {"ritmo": "lento", "intensidade": 0.3}
+
+
+def test_style_reference_http_delete_clears_media(client, fake_builder, isolated_voices):
+    voice = _upload(client, name="Estilo API limpar").json()["voice"]
+    style = client.post(
+        f"/api/tts/voices/{voice['id']}/styles",
+        json={"name": "Calmo"},
+    ).json()
+
+    uploaded = client.post(
+        f"/api/tts/voices/{voice['id']}/styles/{style['style_id']}/reference",
+        files={"file": ("estilo.wav", make_speech_wav(seconds=1.5), "audio/wav")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+
+    deleted = client.delete(f"/api/tts/voices/{voice['id']}/styles/{style['style_id']}/reference")
+    assert deleted.status_code == 200, deleted.text
+    payload = deleted.json()
+    assert payload["style_id"] == style["style_id"]
+    assert payload["reference"] == {"status": "missing"}
+
+    style_dir = isolated_voices / voice["id"] / "styles" / style["style_id"]
+    assert not (style_dir / "reference.wav").exists()
+    assert not (style_dir / "original.wav").exists()
+
+    fetched = client.get(f"/api/tts/voices/{voice['id']}/styles/{style['style_id']}/reference")
+    assert fetched.status_code == 404
+
+
+def test_style_original_audio_http_fetch(client, fake_builder):
+    voice = _upload(client, name="Estilo API original").json()["voice"]
+    style = client.post(
+        f"/api/tts/voices/{voice['id']}/styles",
+        json={"name": "Didatico"},
+    ).json()
+
+    source_audio = make_speech_wav(seconds=1.5, sr=48000, stereo=True)
+    uploaded = client.post(
+        f"/api/tts/voices/{voice['id']}/styles/{style['style_id']}/reference",
+        files={"file": ("estilo.wav", source_audio, "audio/wav")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+
+    fetched = client.get(f"/api/tts/voices/{voice['id']}/styles/{style['style_id']}/original")
+    assert fetched.status_code == 200
+    assert fetched.headers["content-type"] == "audio/wav"
+    assert fetched.content == source_audio

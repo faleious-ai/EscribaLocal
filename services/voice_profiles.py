@@ -968,6 +968,22 @@ def set_style_reference(
     return _style_public(_load_style(voice_id, style_id))
 
 
+def clear_style_reference(voice_id: str, style_id: str) -> Dict[str, Any]:
+    _load_profile(voice_id)
+    style = _load_style(voice_id, style_id)
+
+    for path in (style_reference_path(voice_id, style_id), style_original_path(voice_id, style_id)):
+        if path.exists():
+            path.unlink()
+
+    style["reference"] = {"status": "missing"}
+    style["updated_at"] = _now_iso()
+    _save_style(voice_id, style)
+    _save_profile(_load_profile(voice_id))
+    record_app_event("voice_style_reference_cleared", voice_id=voice_id, style_id=style_id)
+    return _style_public(_load_style(voice_id, style_id))
+
+
 def update_style(
     voice_id: str,
     style_id: str,
