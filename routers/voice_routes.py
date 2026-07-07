@@ -7,7 +7,7 @@ reprocessamento) rodam no thread pool.
 import asyncio
 import io
 import os
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
@@ -109,6 +109,30 @@ class VoicePatch(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=80)
 
 
+class StyleCreateBody(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    description: str = Field("", max_length=500)
+    aliases: list[str] = Field(default_factory=list)
+    instruction: str = Field("", max_length=1000)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    engine_compatibility: dict[str, str] = Field(default_factory=dict)
+
+
+class StylePatchBody(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=80)
+    description: Optional[str] = Field(None, max_length=500)
+    aliases: Optional[list[str]] = None
+    instruction: Optional[str] = Field(None, max_length=1000)
+    parameters: Optional[dict[str, Any]] = None
+    active: Optional[bool] = None
+    order: Optional[int] = Field(None, ge=0)
+    engine_compatibility: Optional[dict[str, str]] = None
+
+
+class StyleDuplicateBody(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+
 @router.patch("/voices/{voice_id}")
 async def patch_voice(voice_id: str, body: VoicePatch):
     try:
@@ -117,6 +141,96 @@ async def patch_voice(voice_id: str, body: VoicePatch):
         return voice_profiles.get_voice(voice_id)
     except Exception as exc:
         raise _http_error(exc)
+
+
+@router.get("/voices/{voice_id}/styles")
+async def list_styles(voice_id: str):
+    try:
+        return {"items": voice_profiles.get_voice(voice_id).get("styles", {}).get("items", [])}
+    except Exception as exc:
+        raise _http_error(exc)
+
+
+@router.post("/voices/{voice_id}/styles")
+async def create_style(voice_id: str, body: StyleCreateBody):
+    try:
+        return voice_profiles.create_style(
+            voice_id,
+            name=body.name,
+            description=body.description,
+            aliases=body.aliases,
+            instruction=body.instruction,
+            parameters=body.parameters,
+            engine_compatibility=body.engine_compatibility,
+        )
+    except Exception as exc:
+        raise _http_error(exc)
+
+
+@router.patch("/voices/{voice_id}/styles/{style_id}")
+async def patch_style(voice_id: str, style_id: str, body: StylePatchBody):
+    try:
+        return voice_profiles.update_style(
+            voice_id,
+            style_id,
+            name=body.name,
+            description=body.description,
+            aliases=body.aliases,
+            instruction=body.instruction,
+            parameters=body.parameters,
+            active=body.active,
+            order=body.order,
+            engine_compatibility=body.engine_compatibility,
+        )
+    except Exception as exc:
+        raise _http_error(exc)
+
+
+@router.post("/voices/{voice_id}/styles/{style_id}/duplicate")
+async def duplicate_style(voice_id: str, style_id: str, body: StyleDuplicateBody):
+    try:
+        return voice_profiles.duplicate_style(voice_id, style_id, name=body.name)
+    except Exception as exc:
+        raise _http_error(exc)
+
+
+@router.delete("/voices/{voice_id}/styles/{style_id}")
+async def delete_style(voice_id: str, style_id: str):
+    try:
+        return voice_profiles.delete_style(voice_id, style_id)
+    except Exception as exc:
+        raise _http_error(exc)
+
+
+@router.post("/voices/{voice_id}/styles/{style_id}/reference")
+async def upload_style_reference(voice_id: str, style_id: str, file: UploadFile = File(...)):
+    content = await file.read()
+    ext = os.path.splitext(file.filename or "")[1] or ".webm"
+    loop = asyncio.get_running_loop()
+    try:
+        style = await loop.run_in_executor(
+            None,
+            lambda: voice_profiles.set_style_reference(
+                voice_id,
+                style_id,
+                audio_bytes=content,
+                original_ext=ext,
+            ),
+        )
+    except Exception as exc:
+        raise _http_error(exc)
+    return style
+
+
+@router.get("/voices/{voice_id}/styles/{style_id}/reference")
+async def get_style_reference_audio(voice_id: str, style_id: str):
+    try:
+        path = voice_profiles.style_reference_path(voice_id, style_id)
+    except voice_profiles.VoiceNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Referência de estilo não encontrada.")
+    return FileResponse(str(path), media_type="audio/wav")
 
 
 @router.delete("/voices/{voice_id}")

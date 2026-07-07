@@ -118,11 +118,84 @@ def test_profile_persists_on_disk(client, fake_builder, isolated_voices):
     assert client.get(f"/api/tts/voices/{voice['id']}").json()["name"] == "Persistente"
 
 
+def test_new_voice_profile_uses_versioned_schema(client, fake_builder, isolated_voices):
+    voice = _upload(client, name="Schema v2").json()["voice"]
+    voice_dir = isolated_voices / voice["id"]
+    profile = json.loads((voice_dir / "profile.json").read_text(encoding="utf-8"))
+
+    assert profile["schema_version"] == 2
+    assert profile["reference"] == {
+        "path": "reference.wav",
+        "hash": profile["reference_hash"],
+        "sample_rate": 24000,
+    }
+    assert profile["original"]["path"] == "original/source.wav"
+    assert profile["library"]["is_default"] is False
+    assert profile["styles"]["items"] == []
+    assert profile["events"]["items"] == {}
+    assert profile["engines"]["vibevoice_1_5b"]["embedding"]["status"] == "ready"
+
+    assert (voice_dir / "original" / "source.wav").exists()
+    assert (voice_dir / "engines" / "vibevoice_1_5b" / voice_profiles.EMBEDDINGS_FILENAME).exists()
+    assert (voice_dir / "engines" / "chatterbox_pt_br").is_dir()
+
+
 def test_no_absolute_paths_in_public_responses(client, fake_builder, isolated_voices):
     _upload(client, name="Privada")
     payload = json.dumps(client.get("/api/tts/voices").json())
     assert str(isolated_voices) not in payload
     assert ":\\\\" not in payload and ":\\" not in payload.replace("\\\\", "\\")
+
+
+def test_legacy_profile_is_migrated_to_schema_v2(isolated_voices):
+    voice_id = "11111111-2222-3333-4444-555555555555"
+    voice_dir = isolated_voices / voice_id
+    (voice_dir / "embeddings").mkdir(parents=True)
+    (voice_dir / "reference.wav").write_bytes(make_speech_wav(seconds=1.0, sr=24000, stereo=False))
+    (voice_dir / "original_audio.wav").write_bytes(make_speech_wav(seconds=1.0, sr=24000, stereo=False))
+    (voice_dir / "preview.wav").write_bytes(b"preview")
+    (voice_dir / "embeddings" / voice_profiles.EMBEDDINGS_FILENAME).write_bytes(b"embeds")
+    (voice_dir / "profile.json").write_text(json.dumps({
+        "id": voice_id,
+        "name": "Legado",
+        "source": "upload",
+        "language": "pt-BR",
+        "created_at": "2026-06-16T00:00:00+0000",
+        "updated_at": "2026-06-16T00:00:00+0000",
+        "duration_seconds": 1.0,
+        "sample_rate": 24000,
+        "consent_confirmed": True,
+        "is_preset": False,
+        "is_default": True,
+        "reference_hash": "a" * 64,
+        "analysis": {},
+        "validation": None,
+        "model_embeddings": {
+            "vibevoice_1_5b": {
+                "status": "pending",
+                "model_revision": None,
+                "reference_hash": None,
+            }
+        },
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    first = voice_profiles.get_voice(voice_id)
+    migrated_once = json.loads((voice_dir / "profile.json").read_text(encoding="utf-8"))
+    migrated_twice = voice_profiles._load_profile(voice_id)
+
+    assert first["id"] == voice_id
+    assert migrated_once["schema_version"] == 2
+    assert migrated_once == migrated_twice
+    assert migrated_once["original"]["path"] == "original/source.wav"
+    assert migrated_once["library"]["is_default"] is True
+    assert migrated_once["engines"]["vibevoice_1_5b"]["embedding"]["status"] == "pending"
+
+    assert not (voice_dir / "original_audio.wav").exists()
+    assert not (voice_dir / "preview.wav").exists()
+    assert not (voice_dir / "embeddings" / voice_profiles.EMBEDDINGS_FILENAME).exists()
+    assert (voice_dir / "original" / "source.wav").exists()
+    assert (voice_dir / "previews" / "preview.wav").exists()
+    assert (voice_dir / "engines" / "vibevoice_1_5b" / voice_profiles.EMBEDDINGS_FILENAME).exists()
 
 
 # ------------------------------------------------------------------- gestão
@@ -321,3 +394,202 @@ def test_export_import_roundtrip(client, fake_builder):
     assert new_voice["id"] != voice["id"]
     assert new_voice["name"] == "Exportável"
     assert new_voice["model_embeddings"]["vibevoice_1_5b"]["status"] == "pending"
+
+
+def test_create_style_persists_in_profile_and_disk(client, fake_builder, isolated_voices):
+    voice = _upload(client, name="Com estilos").json()["voice"]
+
+    style = voice_profiles.create_style(
+        voice["id"],
+        name="Acolhedor",
+        description="Tom calmo e próximo.",
+        aliases=["calmo", "proximo"],
+        engine_compatibility={"tts_1_5b": "experimental"},
+    )
+
+    persisted = voice_profiles.get_voice(voice["id"])
+    style_dir = isolated_voices / voice["id"] / "styles" / style["style_id"]
+    style_json = json.loads((style_dir / "style.json").read_text(encoding="utf-8"))
+
+    assert style["style_id"] == "acolhedor"
+    assert persisted["styles"]["items"][0]["style_id"] == "acolhedor"
+    assert persisted["styles"]["items"][0]["aliases"] == ["calmo", "proximo"]
+    assert style_json["name"] == "Acolhedor"
+    assert style_json["engine_compatibility"] == {"tts_1_5b": "experimental"}
+    assert style_json["order"] == 0
+    assert style_json["active"] is True
+
+
+def test_style_update_duplicate_reorder_and_delete(client, fake_builder, isolated_voices):
+    voice = _upload(client, name="Estilos CRUD").json()["voice"]
+    original = voice_profiles.create_style(voice["id"], name="Acolhedor")
+
+    renamed = voice_profiles.update_style(
+        voice["id"],
+        original["style_id"],
+        name="Acolhedor suave",
+        aliases=["suave"],
+        active=False,
+    )
+    duplicate = voice_profiles.duplicate_style(
+        voice["id"],
+        original["style_id"],
+        name="Acolhedor copia",
+    )
+    reordered = voice_profiles.update_style(
+        voice["id"],
+        duplicate["style_id"],
+        order=0,
+        active=True,
+    )
+    deleted = voice_profiles.delete_style(voice["id"], original["style_id"])
+    persisted = voice_profiles.get_voice(voice["id"])
+
+    assert renamed["style_id"] == original["style_id"]
+    assert renamed["name"] == "Acolhedor suave"
+    assert renamed["aliases"] == ["suave"]
+    assert renamed["active"] is False
+
+    assert duplicate["style_id"] == "acolhedor-copia"
+    assert duplicate["name"] == "Acolhedor copia"
+
+    assert reordered["order"] == 0
+    assert reordered["active"] is True
+    assert [item["style_id"] for item in persisted["styles"]["items"]] == ["acolhedor-copia"]
+    assert deleted["deleted"] == original["style_id"]
+    assert not (isolated_voices / voice["id"] / "styles" / original["style_id"]).exists()
+
+
+def test_style_http_crud(client, fake_builder):
+    voice = _upload(client, name="Estilos API").json()["voice"]
+
+    created = client.post(
+        f"/api/tts/voices/{voice['id']}/styles",
+        json={
+            "name": "Narrativo",
+            "description": "Leitura contínua",
+            "aliases": ["narracao"],
+            "engine_compatibility": {"tts_1_5b": "experimental"},
+        },
+    )
+    assert created.status_code == 200, created.text
+    style = created.json()
+    assert style["style_id"] == "narrativo"
+
+    listed = client.get(f"/api/tts/voices/{voice['id']}/styles")
+    assert listed.status_code == 200
+    assert [item["style_id"] for item in listed.json()["items"]] == ["narrativo"]
+
+    updated = client.patch(
+        f"/api/tts/voices/{voice['id']}/styles/{style['style_id']}",
+        json={"name": "Narrativo calmo", "active": False, "order": 0},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "Narrativo calmo"
+    assert updated.json()["active"] is False
+
+    duplicated = client.post(
+        f"/api/tts/voices/{voice['id']}/styles/{style['style_id']}/duplicate",
+        json={"name": "Narrativo cópia"},
+    )
+    assert duplicated.status_code == 200
+    assert duplicated.json()["style_id"] == "narrativo-copia"
+
+    deleted = client.delete(f"/api/tts/voices/{voice['id']}/styles/{style['style_id']}")
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] == "narrativo"
+
+    remaining = client.get(f"/api/tts/voices/{voice['id']}/styles").json()["items"]
+    assert [item["style_id"] for item in remaining] == ["narrativo-copia"]
+
+
+def test_style_reference_persists_on_disk(client, fake_builder, isolated_voices):
+    voice = _upload(client, name="Estilo com referência").json()["voice"]
+    style = voice_profiles.create_style(voice["id"], name="Calmo")
+
+    updated = voice_profiles.set_style_reference(
+        voice["id"],
+        style["style_id"],
+        audio_bytes=make_speech_wav(seconds=2.0, sr=48000, stereo=True),
+        original_ext=".wav",
+    )
+    style_dir = isolated_voices / voice["id"] / "styles" / style["style_id"]
+
+    assert updated["reference"]["status"] == "ready"
+    assert len(updated["reference"]["hash"]) == 64
+    assert (style_dir / "reference.wav").exists()
+    assert (style_dir / "original.wav").exists()
+
+    sr, data = wavfile.read(str(style_dir / "reference.wav"))
+    assert sr == 24000
+    assert data.ndim == 1
+
+
+def test_style_reference_http_upload_and_fetch(client, fake_builder):
+    voice = _upload(client, name="Estilo API mídia").json()["voice"]
+    style = client.post(
+        f"/api/tts/voices/{voice['id']}/styles",
+        json={"name": "Didático"},
+    ).json()
+
+    uploaded = client.post(
+        f"/api/tts/voices/{voice['id']}/styles/{style['style_id']}/reference",
+        files={"file": ("estilo.wav", make_speech_wav(seconds=1.5), "audio/wav")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    payload = uploaded.json()
+    assert payload["style_id"] == style["style_id"]
+    assert payload["reference"]["status"] == "ready"
+
+    fetched = client.get(f"/api/tts/voices/{voice['id']}/styles/{style['style_id']}/reference")
+    assert fetched.status_code == 200
+    assert fetched.headers["content-type"] == "audio/wav"
+
+
+def test_style_instruction_and_parameters_roundtrip(client, fake_builder, isolated_voices):
+    voice = _upload(client, name="Estilo completo").json()["voice"]
+
+    created = client.post(
+        f"/api/tts/voices/{voice['id']}/styles",
+        json={
+            "name": "Narrativo",
+            "instruction": "Leia como uma historia contada ao pe do ouvido.",
+            "parameters": {"ritmo": "constante", "intensidade": 0.5},
+        },
+    )
+    assert created.status_code == 200, created.text
+    style = created.json()
+    assert style["instruction"] == "Leia como uma historia contada ao pe do ouvido."
+    assert style["parameters"] == {"ritmo": "constante", "intensidade": 0.5}
+
+    updated = client.patch(
+        f"/api/tts/voices/{voice['id']}/styles/{style['style_id']}",
+        json={
+            "instruction": "Reduza a energia e mantenha a narracao uniforme.",
+            "parameters": {"ritmo": "lento", "intensidade": 0.3},
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    payload = updated.json()
+    assert payload["instruction"] == "Reduza a energia e mantenha a narracao uniforme."
+    assert payload["parameters"] == {"ritmo": "lento", "intensidade": 0.3}
+
+    duplicated = client.post(
+        f"/api/tts/voices/{voice['id']}/styles/{style['style_id']}/duplicate",
+        json={"name": "Narrativo copia"},
+    )
+    assert duplicated.status_code == 200, duplicated.text
+    assert duplicated.json()["instruction"] == "Reduza a energia e mantenha a narracao uniforme."
+    assert duplicated.json()["parameters"] == {"ritmo": "lento", "intensidade": 0.3}
+
+    persisted = json.loads(
+        (
+            isolated_voices
+            / voice["id"]
+            / "styles"
+            / style["style_id"]
+            / "style.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert persisted["instruction"] == "Reduza a energia e mantenha a narracao uniforme."
+    assert persisted["parameters"] == {"ritmo": "lento", "intensidade": 0.3}

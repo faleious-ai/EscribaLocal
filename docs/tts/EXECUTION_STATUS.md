@@ -1,6 +1,6 @@
 # TTS Execution Status
 
-Data: 2026-06-16
+Data: 2026-07-07
 
 Fonte de verdade de progresso para o subsistema TTS. Estados validos:
 `not_started`, `in_progress`, `implemented`, `verified`, `blocked`,
@@ -20,6 +20,9 @@ Fonte de verdade de progresso para o subsistema TTS. Estados validos:
 
 ## Gates Posteriores
 
-Gate B permanece `not_started` nesta branch. O proximo passo permitido depois
-da revisao do Gate A e T2.1: versionar `profile.json` e preparar migracao
-idempotente do modelo de dados, sem parser, RenderPlan ou UI de estilos ainda.
+## Gate B
+
+| ID | Nome | Gate | Estado | Branch | PR | Commit | Evidencia | Testes | Pendencias | Dependencias | Proximo passo permitido |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T2.1 | Versionar schema de voz | B | verified | `main` | n/a | working tree sobre `cfe4a11d` | `services/voice_profiles.py` grava `schema_version=2`, migra `profile.json` legado, move artefatos para `original/`, `previews/` e `engines/`, e preserva compatibilidade publica com `model_embeddings` e `is_default`. | `python -m pytest tests/test_voice_profiles.py -k versioned_schema -q` -> `1 passed`; `python -m pytest tests/test_voice_profiles.py -k legacy_profile_is_migrated_to_schema_v2 -q` -> `1 passed`; `python -m pytest tests/test_voice_profiles.py tests/test_tts_legacy_voice_migration.py tests/test_tts_no_fallbacks.py tests/test_tts_large_clear_errors.py tests/test_tts_realtime_worker.py -q` -> `69 passed`; `python -m pytest -q` -> `224 passed`, `4 warnings`. | Estilos, eventos e wizard inicial seguem fora de escopo desta tarefa; `profile.json` agora prepara o terreno mas nao implementa T2.2, T2.3 ou T3.x. | Gate A verificado. | Iniciar T2.2 sem desfazer compatibilidade do schema v2; manter migracao idempotente como barreira. |
+| T2.2 | Implementar entidade Style | B | in_progress | `main` | n/a | working tree sobre `cfe4a11d` | `services/voice_profiles.py` persiste `style.json` em `styles/<style_id>/`, sincroniza resumos em `profile.json`, aceita referência opcional normalizada por estilo e expõe metadado público de referência. `routers/voice_routes.py` oferece listagem, criação, edição, duplicação, exclusão, upload de referência e leitura de mídia por HTTP. CRUD básico preserva `style_id` no rename e reordena estilos sem quebrar o schema v2. | `python -m pytest tests/test_voice_profiles.py -k create_style_persists_in_profile_and_disk -q` -> `1 passed`; `python -m pytest tests/test_voice_profiles.py -k style_update_duplicate_reorder_and_delete -q` -> `1 passed`; `python -m pytest tests/test_voice_profiles.py -k style_http_crud -q` -> `1 passed`; `python -m pytest tests/test_voice_profiles.py -k "style_reference_persists_on_disk or style_reference_http_upload_and_fetch" -q` -> `2 passed`; `python -m pytest tests/test_voice_profiles.py tests/test_tts_legacy_voice_migration.py tests/test_tts_no_fallbacks.py tests/test_tts_large_clear_errors.py tests/test_tts_realtime_worker.py -q` -> `74 passed`; `python -m pytest -q` -> `229 passed`, `4 warnings`. | Falta preview por estilo, edição completa de mídia de estilo na UI e compatibilidade por engine para além do metadado persistido. | T2.1. | Concluir T2.2 pela superfície de preview/referência opcional e preparar T2.3 sem quebrar o schema v2 nem a API já validada. |
