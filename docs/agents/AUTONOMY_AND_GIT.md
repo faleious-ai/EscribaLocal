@@ -2,115 +2,113 @@
 
 ## Quando carregar
 
-Carregue este arquivo quando a tarefa envolver issue, alteração de arquivos,
-commit, push, atualização remota no GitHub, dúvida sobre autonomia, branch,
-escopo, publicação, continuidade ou estado local.
+Carregue quando a tarefa envolver issue, alteração de arquivos, commit, push,
+atualização remota, autonomia, branch, escopo, publicação ou continuidade.
 
 ## Regime de trabalho Git
 
-Decisão operacional vigente: todo trabalho deve acontecer diretamente em `main`.
-Não crie branches de trabalho, branches `codex/*` ou branches paralelas sem uma
-instrução explícita posterior do usuário revogando esta decisão.
+Todo trabalho ocorre diretamente em `main`. Não crie branches de trabalho sem
+instrução explícita posterior do usuário.
 
-Se encontrar trabalho em outra branch, consolide-o em `main` antes de continuar,
-preservando alterações locais e sem descartar commits. Depois da consolidação
-local, remova a branch paralela local quando ela não for mais necessária.
+Se encontrar trabalho em outra branch, consolide-o em `main` preservando commits e
+alterações locais. Não use comandos destrutivos nem reescreva histórico.
 
 ## Autorização permanente para issues delimitadas
 
-O usuário autoriza permanentemente o agente a realizar, sem pedir ou aguardar
-nova confirmação, todas as ações necessárias para concluir uma issue delimitada
-deste repositório.
+O usuário autoriza o agente a concluir, sem nova confirmação, issues delimitadas
+de `faleious-ai/EscribaLocal` que possuam objetivo, escopo, fora de escopo, aceite
+e parada claros, estejam `ready-for-agent` ou tenham sido escolhidas
+explicitamente e não dependam de decisão humana pendente.
 
-Uma issue está delimitada quando:
+Dentro desses limites, estão autorizados:
 
-* pertence a `faleious-ai/EscribaLocal` e está identificada por número ou título;
-* possui objetivo, escopo, fora de escopo, critérios de aceite e critério de
-  parada claros na própria issue ou nos documentos de precedência do projeto;
-* está `ready-for-agent` ou foi escolhida explicitamente pelo usuário;
-* não depende de decisão humana pendente, informação ausente ou ampliação de
-  escopo.
+- leitura, edição, testes e dependências necessárias;
+- atualização de documentação, ledger, planos e runway;
+- commits e push em `main`;
+- comentários, edição, labels, fechamento ou reabertura de issues;
+- outras alterações remotas exigidas pelo aceite.
 
-Dentro desses limites, estão previamente autorizados:
+Não estão autorizados sem decisão explícita:
 
-* leitura, edição, testes, instalação de dependências necessárias e atualização
-  de documentação, ledger e planos;
-* commits e push diretamente em `main`;
-* comentários, edição, labels, fechamento ou reabertura de GitHub Issues;
-* outras alterações remotas no próprio repositório exigidas pelo aceite;
-* tag, release ou deploy somente quando forem requisitos explícitos da issue.
-
-A autorização não permite criar branches, ampliar o escopo, reescrever histórico,
-usar comandos Git destrutivos, apagar dados não pertencentes à issue, modificar
-segredos reais ou atuar em sistemas externos que não estejam explicitamente no
-escopo. Issues `ready-for-human`, `needs-info`, `needs-triage` ou bloqueadas por
-decisão humana exigem resolver esse estado antes da execução autônoma.
-
-O agente deve executar testes e revisão proporcionais ao risco, registrar
-evidências no tracker/ledger, respeitar o critério de parada e relatar as ações
-remotas depois de concluí-las; não deve interromper o fluxo apenas para pedir
-autorização já concedida por este protocolo.
+- ampliar escopo;
+- criar branches;
+- reescrever histórico;
+- apagar dados alheios à issue;
+- modificar segredos;
+- atuar em sistemas externos não previstos;
+- criar tag, release ou deploy sem requisito explícito.
 
 ## GitHub como memória recuperável
 
-O GitHub é a fonte primária de continuidade. O chat não deve ser a única memória
-do trabalho.
+Toda etapa não trivial termina com estado persistido no repo. Faça commits
+pequenos, descritivos e preferencialmente verdes. Atualize issue, ledger, plano ou
+runway quando necessário para reconstruir continuidade.
 
-Toda etapa não trivial deve terminar com estado persistido no repositório. Sempre
-que uma etapa gerar mudança útil e coerente, faça commit pequeno, descritivo e,
-quando aplicável, vinculado à issue. Ao fim de cada rodada, o trabalho atual deve
-estar commitado e publicado em `main`, salvo bloqueio técnico explícito.
+Antes de encerrar, rode `git status --short --branch` quando houver ambiente local.
+Em execução pela API do GitHub, informe o commit e a limitação de não haver working
+tree local inspecionável.
 
-Atualize issue, ledger, plano ou documento de status junto com o código quando
-isso for necessário para reconstruir a continuidade. Não deixe decisões,
-progresso, pendências ou critérios de retomada apenas no chat.
+## Checkpoints sem interrupção
 
-Antes de encerrar a rodada, rode `git status --short --branch` quando houver
-ambiente local disponível e informe se o working tree ficou limpo ou por que não
-ficou. Quando a rodada for executada diretamente pela API do GitHub, informe o
-commit publicado e a limitação de não haver working tree local inspecionável.
+Commit/push não encerra a rodada. Depois de cada checkpoint:
 
-## Checkpoints de etapa
+1. registrar evidência na issue quando aplicável;
+2. atualizar memória operacional se o estado mudou;
+3. reavaliar dependentes e fila;
+4. continuar se houver item `Ready`.
 
-Uma etapa pode ser atualização documental de governança, triagem de issue,
-criação ou ajuste de plano, teste novo, implementação de fatia vertical,
-correção de bug, atualização de ledger/status, comentário ou fechamento de issue,
-ou revisão final.
+## Gate obrigatório de fechamento de issue
 
-Cada etapa deve gerar um commit quando produzir alteração persistente relevante.
-Os commits devem ser pequenos o suficiente para revisão, descritivos,
-preferencialmente verdes, acompanhados de testes proporcionais ao risco e sem
-misturar tarefas independentes.
+Uma issue só pode ser fechada quando:
 
-## Checkpoint sem interrupção desnecessária
+- todos os critérios de aceite estão explicitamente avaliados;
+- cada critério aponta para teste, diff, documento, comando ou outra evidência;
+- testes/verificações proporcionais ao risco foram executados;
+- limitações e verificações impossíveis foram registradas;
+- commits relevantes estão publicados;
+- ledger/status foi atualizado quando aplicável;
+- runway/plano foi atualizado se a fila mudou;
+- dependentes foram retriados;
+- o comentário final contém o mapa `aceite → evidência`.
 
-Fazer commit/push ao concluir uma etapa útil não significa parar a rodada. Após
-cada checkpoint publicado, o agente deve reavaliar a fila e continuar se houver
-próxima tarefa delimitada, autorizada e desbloqueada.
+Suíte verde isolada não prova critérios não cobertos. Não feche uma issue apenas
+porque um teste existente passou ou porque a implementação parece plausível.
 
-GitHub deve funcionar como memória incremental durante a execução, não como sinal
-automático de parada. O agente deve parar apenas quando o próximo passo exigir
-decisão humana que bloqueie todas as próximas ações úteis ou quando não houver
-mais trabalho seguro a fazer.
+Formato recomendado do comentário final:
+
+```text
+## Evidência de fechamento
+- Commit(s):
+- Testes/verificações:
+- Critério 1 → evidência:
+- Critério 2 → evidência:
+- Limitações:
+- Ledger/runway atualizados:
+- Dependentes retriados:
+```
+
+## Reabertura por aceite incompleto
+
+Se auditoria posterior demonstrar que um critério explícito não foi entregue ou
+não possui evidência suficiente, o agente está autorizado a:
+
+1. reabrir a issue;
+2. registrar a lacuna objetivamente;
+3. corrigir ledger/runway;
+4. bloquear dependentes;
+5. executar a correção somente quando a issue estiver novamente delimitada e
+   pronta.
+
+Reabrir não apaga o trabalho já entregue; distingue entrega parcial de aceite
+completo.
 
 ## Commits vermelhos
 
-Não use commit vermelho em `main` como padrão.
-
-Um commit vermelho só é aceitável quando:
-
-* for uma etapa TDD deliberada;
-* a falha estiver isolada e documentada;
-* o commit deixar claro que é um checkpoint RED;
-* a próxima etapa imediata for implementar o GREEN;
-* o usuário tiver autorizado esse padrão para a tarefa.
-
-Caso contrário, commits publicados em `main` devem preservar estado executável
-ou, no mínimo, documentar claramente a limitação.
+Não publique commit vermelho em `main` como padrão. Só é aceitável em TDD
+deliberado, isolado, documentado e com próxima etapa GREEN imediata autorizada.
 
 ## Exceções de publicação
 
-Se não for possível commit/push, registre o motivo, estado local, arquivos
-afetados, testes/verificações executados e próximo passo seguro. Antes de gerar
-`$handoff`, prefira persistir a continuidade em issue, ledger, plano ou documento
-de status.
+Se não for possível commit/push, registre motivo, estado local, arquivos afetados,
+verificações e próximo passo seguro. Antes de `$handoff`, prefira persistir em
+issue, ledger, plano ou runway.
