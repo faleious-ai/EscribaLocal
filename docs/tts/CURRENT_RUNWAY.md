@@ -16,11 +16,11 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 
 ### Ready
 
-- #24 / T5.1 — reabrir e concluir o aceite incompleto do RenderPlan persistível.
+- #24 / T5.1 — reaberta e delimitada para concluir o aceite incompleto do RenderPlan persistível.
 
 ### Blocked-technical
 
-- #25 / T5.2 — depende da conclusão real de #24.
+- #25 / T5.2 — depende da conclusão real de #24; label `ready-for-agent` removida.
 
 ### Blocked-human
 
@@ -32,7 +32,7 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 
 ## Próxima issue executável
 
-#24 — corrigir exclusivamente o contrato de T5.1: preservar seções no manifesto, fortalecer identidade determinística e produzir evidência explícita para cada critério de aceite.
+#24 — preservar seções no manifesto, fortalecer identidade determinística e produzir evidência explícita para cada critério de aceite.
 
 ## DAG imediato
 
@@ -56,6 +56,6 @@ Parar quando #24 cumprir integralmente o contrato revisado, com testes focais e 
 
 Após cada checkpoint, atualizar primeiro a issue ativa e, se o estado da fila mudar, este arquivo e `EXECUTION_STATUS.md`. O chat não é fonte suficiente de memória.
 
-## Limitação da configuração GitHub nesta rodada
+## Configuração GitHub ainda pendente
 
-O conector disponível permite criar e atualizar arquivos/issues, mas não expõe criação de GitHub Project, milestone, sub-issues ou dependências nativas. Enquanto esses recursos não forem configurados na UI/CLI, #26 e o DAG textual são a projeção operacional do Gate C.
+O conector desta rodada não expôs criação de GitHub Project, milestone, sub-issues ou dependências nativas. A configuração exata está persistida em `docs/tts/GITHUB_PROJECT_SETUP.md`. Até execução por UI/CLI, #26 e o DAG textual são a projeção operacional do Gate C.
