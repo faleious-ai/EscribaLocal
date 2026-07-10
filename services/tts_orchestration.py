@@ -5,6 +5,7 @@ speakers, interpreta tags suportadas, normaliza casos comuns de PT-BR e
 segmenta sem deixar instruções literais vazarem para a engine.
 """
 import re
+import hashlib
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -42,6 +43,42 @@ class ScriptNode:
 @dataclass
 class ScriptAst:
     nodes: List[ScriptNode]
+
+
+@dataclass(frozen=True)
+class RenderJob:
+    job_id: str
+    order: int
+    voice_id: str
+    style_id: Optional[str]
+    reference: Optional[str]
+    parameters: Dict[str, str]
+    original_text: str
+    normalized_text: str
+
+
+@dataclass(frozen=True)
+class RenderPlan:
+    version: int
+    jobs: List[RenderJob]
+
+    def manifest(self) -> Dict[str, object]:
+        return {"version": self.version, "jobs": [job.__dict__ for job in self.jobs]}
+
+
+def build_render_plan(ast: ScriptAst, *, voice_id: str, reference: Optional[str] = None) -> RenderPlan:
+    jobs: List[RenderJob] = []
+    def walk(nodes: List[ScriptNode], style: Optional[ScriptNode] = None) -> None:
+        for node in nodes:
+            if node.kind == "style": walk(node.children, node)
+            elif node.kind == "text":
+                normalized = normalize_pt_br(node.text)
+                order = len(jobs)
+                key = f"{order}:{voice_id}:{style.text if style else ''}:{node.text}"
+                jobs.append(RenderJob(hashlib.sha256(key.encode()).hexdigest()[:16], order, voice_id,
+                    style.text if style else None, reference, dict(style.parameters) if style else {}, node.text, normalized))
+    walk(ast.nodes)
+    return RenderPlan(version=1, jobs=jobs)
 
 
 _canonical_tag_pattern = re.compile(r"^\[([a-zA-Z_][\w-]*)(.*?)\]$")
