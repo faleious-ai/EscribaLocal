@@ -104,6 +104,14 @@ def _canonical_spoken_text(script: str) -> str:
     return " ".join(collect(parse_script(script).nodes))
 
 
+def _uses_canonical_script_syntax(script: str) -> bool:
+    return (
+        "[/" in script
+        or any(line.strip().startswith(("##", "[pausa ", "[respiracao", "[suspiro", "[risada"))
+               for line in script.splitlines())
+    )
+
+
 _speaker_line_pattern = re.compile(r"^(?:voz|voice|speaker)\s*([0-9]+)\s*:\s*(.*)$", re.IGNORECASE)
 _tag_pattern = re.compile(r"\[([a-zA-Z_][\w-]*)(?::([^\]]+))?\]")
 _valid_tags = {"style", "pause"}
@@ -305,7 +313,7 @@ def orchestrate_tts(
 
     # A forma canônica possui fechamento explícito; reduza-a para texto falado
     # antes do pipeline legado, preservando a garantia de não vazar tags.
-    if "[/" in text:
+    if _uses_canonical_script_syntax(text):
         text = _canonical_spoken_text(text)
 
     all_tags: List[Dict[str, str]] = []

@@ -20,6 +20,25 @@ def test_canonical_tags_do_not_reach_engine_script():
     assert "[" not in plan.engine_script
 
 
+def test_canonical_subtitle_pause_and_event_do_not_reach_engine_script():
+    plan = orchestrate_tts("## Título\nOlá.\n[pausa 400ms]\n[respiracao profunda]")
+
+    assert plan.engine_script == "Olá."
+    assert "[" not in plan.engine_script
+
+
+@pytest.mark.parametrize("script, expected", [
+    ("[calmo]\nOlá.", "sem fechamento na linha 1, coluna 1"),
+    ("[pausa rápido]", "duração de pausa inválida na linha 1, coluna 1"),
+    ("[/calmo]", "fechamento de estilo inválido na linha 1, coluna 1"),
+])
+def test_parser_reports_line_and_column_for_invalid_syntax(script, expected):
+    with pytest.raises(TtsOrchestrationError) as excinfo:
+        parse_script(script)
+
+    assert expected in str(excinfo.value).lower()
+
+
 def test_orchestration_normalizes_pt_br_and_strips_valid_tags():
     plan = orchestrate_tts(
         "Voz 2: Dra. Ana tem 2 gatos. [style:calmo]\n"
