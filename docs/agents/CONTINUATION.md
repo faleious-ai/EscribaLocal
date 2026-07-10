@@ -11,130 +11,98 @@ commit, ledger, issue ativa ou estado recuperável.
 Toda rodada não trivial deve persistir estado suficiente para retomada em sessão
 limpa. O estado persistido deve responder:
 
-* qual tarefa/issue está ativa;
-* objetivo;
-* escopo;
-* fora de escopo;
-* arquivos relevantes ou alterados;
-* decisões já tomadas;
-* testes e verificações executados;
-* pendências;
-* fila de trabalho executável;
-* próxima ação recomendada;
-* critério de parada;
-* riscos;
-* recomendação de orquestração.
+- qual tarefa/issue está ativa;
+- objetivo;
+- escopo e fora de escopo;
+- arquivos relevantes ou alterados;
+- decisões já tomadas;
+- testes e verificações executados;
+- pendências e riscos;
+- fila executável;
+- próxima ação;
+- critério de parada;
+- recomendação de orquestração.
 
-O handoff conversacional não substitui estado persistido. Se o estado estiver no
+Handoff conversacional não substitui estado persistido. Se o estado estiver no
 GitHub, `$handoff` não é obrigatório. Se algo necessário existir apenas no chat,
-persista em issue, ledger, plano ou documento de status; se isso não for
-possível, gere `$handoff` textual explícito.
+persista em issue, ledger, plano ou runway; se isso não for possível, gere
+`$handoff` explícito.
 
 ## Bootstrap de sessão limpa
 
-Ao receber “Execute o AGENTS.md e continue”, o agente deve:
+Ao receber “Execute o AGENTS.md e continue”:
 
 1. ler `AGENTS.md`;
 2. carregar este documento;
-3. carregar `docs/agents/AUTONOMOUS_RUNWAY.md` quando houver fila, backlog,
-   múltiplas frentes, bloqueios ou continuidade autônoma;
-4. carregar `docs/agents/MODEL_ROUTING.md` para recomendação de modelo, esforço e
-   subagentes;
+3. carregar `docs/agents/AUTONOMOUS_RUNWAY.md` quando houver fila ou bloqueios;
+4. carregar `docs/agents/MODEL_ROUTING.md` para modelo/esforço/subagentes;
 5. carregar `docs/agents/SKILL_ROUTING.md` se a tarefa não for trivial;
-6. carregar `docs/agents/AUTONOMY_AND_GIT.md` se houver issue, edição, commit,
-   push ou ação remota;
-7. ler `CONTEXT.md` quando a tarefa envolver domínio, produto ou TTS;
-8. inspecionar `git status --short --branch` quando houver ambiente local
-   disponível;
-9. identificar a tarefa ativa e a fila de tarefas aplicável por issues, planos,
-   ledgers, documentos de status e arquivos modificados;
-10. ler somente os documentos de continuidade diretamente aplicáveis;
-11. reconstruir objetivo, escopo, fora de escopo, critérios de aceite, testes
-    mínimos, fila executável, próxima ação e critério de parada.
+6. carregar `docs/agents/AUTONOMY_AND_GIT.md` se houver alteração ou ação remota;
+7. ler `CONTEXT.md` para tarefas de domínio/produto;
+8. inspecionar `git status --short --branch` quando houver ambiente local;
+9. identificar tarefa ativa e fila por issues, planos, ledgers e arquivos modificados;
+10. ler somente os documentos diretamente aplicáveis;
+11. reconstruir objetivo, escopo, aceite, testes, próxima ação e parada.
 
-Não carregue o repositório inteiro por padrão. Comece por índice, mapas, buscas
-dirigidas e leitura sob demanda.
+Não carregue o repo inteiro. Comece por índices, cursor curto, issue ativa e busca
+dirigida.
 
 ## Execução contínua até bloqueio real
 
-Uma sessão limpa deve reconstruir não apenas a próxima tarefa isolada, mas a fila
-de tarefas executáveis. O orquestrador deve distinguir:
+Uma sessão limpa deve reconstruir a fila, distinguindo:
 
-* tarefas prontas;
-* tarefas bloqueadas por dependência técnica;
-* tarefas bloqueadas por decisão humana;
-* tarefas fora de escopo;
-* tarefas paralelizáveis;
-* tarefas sequenciais.
+- `Ready`;
+- `Blocked-human`;
+- `Blocked-technical`;
+- `Out-of-scope`;
+- `Parallelizable`;
+- `Sequential`;
+- `Done`.
 
-Se uma tarefa ficar bloqueada por decisão humana, registre o bloqueio e verifique
-se há outra tarefa independente, delimitada e autorizada que possa avançar sem
-esperar o usuário. O agente só deve parar para HITL quando:
-
-* a decisão humana bloqueia todas as próximas ações úteis; ou
-* continuar criaria risco de escopo, produto, segurança ou perda de trabalho; ou
-* faltam critérios de aceite para qualquer próxima ação segura.
-
-Quando houver trabalho paralelo seguro, continue na próxima frente desbloqueada.
-Ao fim da rodada, registre no GitHub quais frentes foram concluídas, quais
-ficaram bloqueadas e por quê.
+Se uma tarefa ficar bloqueada por decisão humana, registre e procure outra frente
+independente. Pare para HITL somente quando a decisão bloquear todas as próximas
+ações úteis, continuar criar risco material ou faltar aceite para qualquer ação
+segura.
 
 ## Quando o comando mínimo é suficiente
 
 “Execute o AGENTS.md e continue” é suficiente quando:
 
-* existe uma tarefa ativa ou fila executável identificável;
-* há issue, plano, ledger ou documento de status com próxima ação clara;
-* o estado Git não contém alterações inexplicadas;
-* critérios de aceite e parada estão claros;
-* não há decisão humana bloqueando todas as próximas ações úteis;
-* a próxima ação está dentro da autorização permanente do repositório.
+- há tarefa ativa ou fila identificável;
+- existe issue/plano/ledger/runway com próxima ação clara;
+- o Git não contém alterações inexplicadas;
+- aceite e parada estão claros;
+- não há decisão humana bloqueando tudo;
+- a ação está dentro da autorização permanente.
 
-Não é suficiente quando:
-
-* há múltiplas tarefas ativas indistinguíveis;
-* arquivos locais modificados não estão explicados;
-* falta critério de aceite;
-* há decisão humana bloqueando todas as próximas ações úteis;
-* a próxima ação depende de contexto que só existe no chat anterior;
-* há risco de sobrescrever trabalho não compreendido.
+Não é suficiente quando há múltiplas tarefas indistinguíveis, contexto apenas no
+chat, working tree inexplicado ou risco de sobrescrever trabalho não compreendido.
 
 ## GitHub como memória primária
 
 O estado recuperável mínimo é:
 
-* commits publicados;
-* issue atualizada quando aplicável;
-* ledger/status atualizado quando aplicável;
-* plano ou documento de continuidade atualizado;
-* testes/verificações registrados;
-* fila concluída, fila bloqueada e próxima execução recomendada.
+- commits publicados;
+- issue atualizada;
+- ledger/status atualizado quando aplicável;
+- runway ou plano atualizado quando a fila mudar;
+- testes/verificações registrados;
+- próxima execução e bloqueios claros.
 
-Uma sessão limpa deve conseguir continuar lendo `AGENTS.md`, este arquivo,
-`docs/agents/AUTONOMOUS_RUNWAY.md`, `CONTEXT.md`, documentos de continuidade e a
-issue ativa. Se uma rodada termina com working tree sujo, isso é exceção e deve
-ser explicado com arquivos afetados, risco e próximo passo seguro.
+Ao final de rodada não trivial, deve ser possível continuar em sessão limpa. Se
+não for, atualize a memória do repo ou gere `$handoff`.
 
-## Invariante de continuidade
+## Estado de domínios específicos
 
-Ao final de qualquer rodada não trivial, deve ser possível abrir uma sessão limpa
-e continuar com “Execute o AGENTS.md e continue”. Se isso não for verdade,
-atualize os arquivos de continuidade aplicáveis ou gere `$handoff`.
+Este arquivo não mantém estado mutável de TTS nem de outros subsistemas.
 
-## Estado atual conhecido do TTS
+Para TTS, leia nesta ordem:
 
-No estado registrado em 2026-07-10:
+1. `docs/tts/CURRENT_RUNWAY.md`;
+2. issue ativa;
+3. `docs/tts/README.md` para roteamento;
+4. `docs/tts/EXECUTION_STATUS.md` quando precisar de evidência/histórico;
+5. `docs/tts/ISSUE_EXECUTION_PLAN.md` quando houver DAG ou múltiplas frentes.
 
-* `#16`, `#17`, `#18` e `#19` estão concluídas;
-* a próxima frente do Gate B é `T3.3` (derivação de referência por engine),
-  que ainda precisa de issue delimitada;
-* `#8` está classificada como `Blocked-human` para Realtime nativo;
-* `#12` está bloqueada por lacunas posteriores e não é a próxima execução
-  operacional;
-* `T4.x` está fora de escopo até concluir `T3.3` e formalizar a ordem posterior;
-* a continuidade principal está em `docs/tts/EXECUTION_STATUS.md`,
-  `docs/tts/ISSUE_EXECUTION_PLAN.md` e nas issues `#18`/`#19` concluídas.
-
-Não iniciar `T3.3` sem formalizar a issue e resolver as decisões técnicas
-necessárias. Quando esse estado mudar, atualize o ledger/status e a issue
-correspondente, não apenas este resumo.
+Se algum documento genérico voltar a duplicar estado datado do TTS, remova a
+duplicação e preserve o estado apenas nas fontes acima.
