@@ -2,6 +2,10 @@
 (function () {
     let wizardModal = null;
     let currentStep = 1;
+    let setupStatus = null;
+    let voiceDraft = null;
+    let voiceRecorder = null;
+    let voiceStream = null;
 
     async function fetchJSON(url, options) {
         const response = await fetch(url, options);
@@ -43,6 +47,7 @@
     }
 
     function renderStep(status) {
+        setupStatus = status;
         let content = "";
         const stepsCount = 7;
 
@@ -98,20 +103,41 @@
         } else if (currentStep === 5) {
             const tts = status.tts || {};
             const ttsReady = Boolean(tts.ready);
+            const hasDraft = Boolean(voiceDraft);
             content = `
                 <h2>Criar sua voz</h2>
-                <p>Para usar TTS com voz real, crie ou importe uma voz autorizada antes de considerar a síntese pronta.</p>
+                <p>Grave ou envie uma amostra autorizada para criar sua primeira voz sem sair do assistente.</p>
                 <div style="background:rgba(0,242,254,0.05); border:1px solid rgba(0,242,254,0.2); padding:15px; border-radius:8px; margin:15px 0;">
                     <p style="margin:0 0 8px 0; font-size:13px;"><b>Status do TTS:</b> ${ttsReady ? "pronto" : "pendente: crie ou importe uma voz real"}</p>
                     <ul style="margin:0; padding-left:20px; font-size:12.5px; line-height:1.5;">
-                        <li>A biblioteca permite gravar pelo microfone quando o navegador autorizar.</li>
-                        <li>Você também pode enviar um arquivo de áudio ou importar um perfil exportado.</li>
+                        <li>Envie um arquivo de áudio ou grave pelo microfone quando o navegador autorizar.</li>
+                        <li>Ouça a amostra e regrave antes de aprovar a criação da voz.</li>
                         <li>O consentimento é obrigatório: use sua própria voz ou uma voz com autorização expressa.</li>
                     </ul>
                 </div>
-                <div style="display:flex; gap:10px; align-items:center; margin-top:10px;">
-                    <button class="model-btn model-btn-primary" id="wizard-open-voices">Abrir Biblioteca de Vozes</button>
-                    <span class="model-notes">${ttsReady ? `${tts.custom_voice_count || 0} voz(es) disponível(is).` : "Sem voz criada/importada, o TTS seguirá pendente."}</span>
+                <div style="display:grid; gap:10px; margin-top:10px;">
+                    <label style="display:grid; gap:4px; font-size:13px;">
+                        Nome da voz
+                        <input id="wizard-voice-name" type="text" value="Minha voz" maxlength="80">
+                    </label>
+                    <label style="display:grid; gap:4px; font-size:13px;">
+                        Arquivo de áudio
+                        <input id="wizard-voice-file" type="file" accept="audio/*,.m4a,.webm,.opus,.aac">
+                    </label>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                        <button class="model-btn" id="wizard-voice-record-start">Gravar pelo microfone</button>
+                        <button class="model-btn" id="wizard-voice-record-stop" disabled>Parar gravação</button>
+                        <button class="model-btn" id="wizard-voice-discard" ${hasDraft ? "" : "disabled"}>Descartar / regravar</button>
+                    </div>
+                    <audio id="wizard-voice-preview" controls ${hasDraft ? "" : "style=\"display:none\""} ${hasDraft ? `src="${voiceDraft.url}"` : ""}></audio>
+                    <label style="display:flex; gap:8px; align-items:flex-start; font-size:12.5px;">
+                        <input id="wizard-voice-consent" type="checkbox">
+                        Confirmo que esta voz é minha ou que possuo autorização expressa para usá-la.
+                    </label>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <button class="model-btn model-btn-primary" id="wizard-voice-approve" ${hasDraft ? "" : "disabled"}>Aprovar e criar voz</button>
+                        <span id="wizard-voice-status" class="model-notes">${hasDraft ? "Amostra pronta para escuta e aprovação." : "Nenhuma amostra selecionada."}</span>
+                    </div>
                 </div>
                 <div class="modal-footer" style="margin-top:20px; display:flex; justify-content:space-between;">
                     <button class="model-btn" id="wizard-prev">Voltar</button>
@@ -165,7 +191,11 @@
         const prevBtn = document.getElementById("wizard-prev");
         const finishBtn = document.getElementById("wizard-finish");
         const applyPresetBtn = document.getElementById("wizard-apply-preset");
-        const openVoicesBtn = document.getElementById("wizard-open-voices");
+        const voiceFileInput = document.getElementById("wizard-voice-file");
+        const voiceRecordStartBtn = document.getElementById("wizard-voice-record-start");
+        const voiceRecordStopBtn = document.getElementById("wizard-voice-record-stop");
+        const voiceDiscardBtn = document.getElementById("wizard-voice-discard");
+        const voiceApproveBtn = document.getElementById("wizard-voice-approve");
 
         if (nextBtn) {
             nextBtn.addEventListener("click", () => {
@@ -185,8 +215,25 @@
         if (applyPresetBtn) {
             applyPresetBtn.addEventListener("click", () => applyPreset(status.suggested_preset));
         }
-        if (openVoicesBtn) {
-            openVoicesBtn.addEventListener("click", openVoiceLibraryFromWizard);
+        if (voiceFileInput) {
+            voiceFileInput.addEventListener("change", () => {
+                stageVoiceFile(voiceFileInput.files[0], "upload");
+            });
+        }
+        if (voiceRecordStartBtn) {
+            voiceRecordStartBtn.addEventListener("click", startWizardVoiceRecording);
+        }
+        if (voiceRecordStopBtn) {
+            voiceRecordStopBtn.addEventListener("click", stopWizardVoiceRecording);
+        }
+        if (voiceDiscardBtn) {
+            voiceDiscardBtn.addEventListener("click", () => {
+                clearVoiceDraft();
+                renderStep(setupStatus);
+            });
+        }
+        if (voiceApproveBtn) {
+            voiceApproveBtn.addEventListener("click", approveWizardVoice);
         }
 
         // Executar ações de passos específicos
@@ -319,18 +366,120 @@
         }
     }
 
-    function openVoiceLibraryFromWizard() {
-        if (typeof window.openVoiceLibrary === "function") {
-            window.openVoiceLibrary();
-            toast("Biblioteca de Vozes aberta. Grave, envie ou importe uma voz com consentimento.");
-        } else {
-            toast("Biblioteca de Vozes ainda não carregou. Tente novamente em alguns segundos.", true);
+    function clearVoiceDraft() {
+        if (voiceDraft && voiceDraft.url) {
+            URL.revokeObjectURL(voiceDraft.url);
+        }
+        voiceDraft = null;
+    }
+
+    function stageVoiceFile(file, source) {
+        if (!file || !file.size) {
+            toast("Escolha ou grave uma amostra de áudio antes de aprovar.", true);
+            return;
+        }
+        clearVoiceDraft();
+        voiceDraft = { file, source, url: URL.createObjectURL(file) };
+        renderStep(setupStatus);
+    }
+
+    function setVoiceRecordingButtons(recording) {
+        const start = document.getElementById("wizard-voice-record-start");
+        const stop = document.getElementById("wizard-voice-record-stop");
+        if (start) start.disabled = recording;
+        if (stop) stop.disabled = !recording;
+    }
+
+    function stopVoiceStream() {
+        if (voiceStream) {
+            voiceStream.getTracks().forEach((track) => track.stop());
+            voiceStream = null;
+        }
+    }
+
+    async function startWizardVoiceRecording() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            toast("Este navegador não permite gravar pelo microfone.", true);
+            return;
+        }
+        try {
+            voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const chunks = [];
+            voiceRecorder = new MediaRecorder(voiceStream);
+            voiceRecorder.ondataavailable = (event) => {
+                if (event.data && event.data.size) chunks.push(event.data);
+            };
+            voiceRecorder.onstop = () => {
+                const type = voiceRecorder.mimeType || "audio/webm";
+                const file = new File([new Blob(chunks, { type })], "minha-voz.webm", { type });
+                stopVoiceStream();
+                voiceRecorder = null;
+                stageVoiceFile(file, "recording");
+            };
+            voiceRecorder.start();
+            setVoiceRecordingButtons(true);
+        } catch (error) {
+            stopVoiceStream();
+            voiceRecorder = null;
+            setVoiceRecordingButtons(false);
+            toast("Não foi possível acessar o microfone: " + error.message, true);
+        }
+    }
+
+    function stopWizardVoiceRecording() {
+        if (voiceRecorder && voiceRecorder.state === "recording") {
+            voiceRecorder.stop();
+        }
+        setVoiceRecordingButtons(false);
+    }
+
+    async function approveWizardVoice() {
+        const nameInput = document.getElementById("wizard-voice-name");
+        const consentInput = document.getElementById("wizard-voice-consent");
+        const button = document.getElementById("wizard-voice-approve");
+        const status = document.getElementById("wizard-voice-status");
+        const name = nameInput ? nameInput.value.trim() : "";
+        if (!voiceDraft) {
+            toast("Escolha ou grave uma amostra de áudio antes de aprovar.", true);
+            return;
+        }
+        if (!name) {
+            toast("Dê um nome à nova voz.", true);
+            return;
+        }
+        if (!consentInput || !consentInput.checked) {
+            toast("É obrigatório confirmar o consentimento sobre a voz.", true);
+            return;
+        }
+
+        const endpoint = voiceDraft.source === "recording"
+            ? "/api/tts/voices/record"
+            : "/api/tts/voices/upload";
+        const formData = new FormData();
+        formData.append("file", voiceDraft.file, voiceDraft.file.name);
+        formData.append("name", name);
+        formData.append("consent_confirmed", "true");
+        if (button) button.disabled = true;
+        if (status) status.textContent = "Criando sua voz...";
+        try {
+            const result = await fetchJSON(endpoint, { method: "POST", body: formData });
+            await fetchJSON(`/api/tts/voices/${result.voice.id}/set-default`, { method: "POST" });
+            clearVoiceDraft();
+            const refreshedStatus = await fetchJSON("/api/setup/status");
+            toast(`Voz "${result.voice.name}" criada e definida como padrão.`);
+            renderStep(refreshedStatus);
+        } catch (error) {
+            if (status) status.textContent = "Falha ao criar a voz: " + error.message;
+            toast("Falha ao criar a voz: " + error.message, true);
+            if (button) button.disabled = false;
         }
     }
 
     async function completeSetup() {
         try {
             await fetchJSON("/api/setup/complete", { method: "POST" });
+            stopVoiceStream();
+            clearVoiceDraft();
             if (wizardModal) {
                 wizardModal.remove();
             }

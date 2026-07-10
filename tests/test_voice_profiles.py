@@ -256,6 +256,39 @@ def test_set_default(client, fake_builder):
     assert voice_profiles.get_default_voice_id() == voice_b["id"]
 
 
+@pytest.mark.parametrize("endpoint,filename", [
+    ("/api/tts/voices/upload", "minha-voz.wav"),
+    ("/api/tts/voices/record", "minha-voz.webm"),
+])
+def test_first_voice_flow_sets_default_and_makes_setup_tts_ready(
+    client, fake_builder, endpoint, filename
+):
+    created = _upload(
+        client,
+        endpoint=endpoint,
+        filename=filename,
+    )
+
+    assert created.status_code == 200, created.text
+    voice = created.json()["voice"]
+    assert voice["consent_confirmed"] is True
+
+    selected = client.post(f"/api/tts/voices/{voice['id']}/set-default")
+    status = client.get("/api/setup/status")
+
+    assert selected.status_code == 200, selected.text
+    assert status.status_code == 200
+    assert status.json()["tts"] == {
+        "configured": True,
+        "requires_voice": True,
+        "ready": True,
+        "status": "ready",
+        "custom_voice_count": 1,
+        "default_voice_id": voice["id"],
+        "action": "tts_ready",
+    }
+
+
 def test_path_traversal_blocked(client):
     assert client.get("/api/tts/voices/..%2F..%2Fsegredo").status_code == 404
     with pytest.raises(voice_profiles.VoiceNotFound):

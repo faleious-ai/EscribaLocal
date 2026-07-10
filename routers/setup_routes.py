@@ -5,6 +5,12 @@ from typing import Optional
 from services import config_store, env_check, presets, voice_profiles
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
+VOICE_REQUIRED_TTS_MODELS = {
+    "tts_1_5b",
+    "tts_large",
+    "realtime_0_5b",
+    "chatterbox-tts-pt-br",
+}
 
 class TtsSetupStatus(BaseModel):
     configured: bool
@@ -34,8 +40,10 @@ async def get_setup_status():
     default_voice_id = voice_profiles.get_default_voice_id()
     tts_model = settings.defaults.tts.tts_model
     tts_configured = bool(tts_model)
-    requires_voice = tts_model in {"tts_1_5b", "tts_large", "realtime_0_5b"}
-    tts_ready = (not requires_voice) or custom_voice_count > 0
+    requires_voice = tts_model in VOICE_REQUIRED_TTS_MODELS
+    # Uma voz existente, mas ainda não selecionada como padrão, não torna o
+    # TTS utilizável pelo restante da aplicação.
+    tts_ready = (not requires_voice) or bool(default_voice_id)
     environment_ok = env_report.get("overall") != "fail"
     
     return SetupStatusResponse(
