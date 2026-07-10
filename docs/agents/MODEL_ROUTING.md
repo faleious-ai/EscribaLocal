@@ -3,8 +3,8 @@
 ## Quando carregar
 
 Carregue este arquivo quando a tarefa envolver escolha de modelo, esforço,
-orquestrador, subagentes, orçamento de tokens, recomendação da próxima rodada ou
-uso de `Ultra`.
+orquestrador, subagentes, orçamento de tokens, recomendação da próxima execução
+ou uso de `Ultra`.
 
 ## Princípio central
 
@@ -56,8 +56,9 @@ validáveis. Ao usá-lo, registre por que a execução exigia subagentes e por q
 ## Orquestrador e subagentes
 
 O orquestrador é o agente principal que controla objetivo, escopo, restrições,
-orçamento de tokens, decisões, riscos, validação final e resposta consolidada.
-Ele deve ser o menor modelo suficiente para conduzir a decisão principal.
+fila de trabalho, dependências, bloqueios, orçamento de tokens, decisões, riscos,
+validação final e resposta consolidada. Ele deve ser o menor modelo suficiente
+para conduzir a decisão principal.
 
 Use `5.6 Sol` como orquestrador quando houver ambiguidade alta, decisão crítica,
 arquitetura, segurança, refatoração ampla, reconciliação de subagentes
@@ -94,6 +95,32 @@ Evite subagentes quando a tarefa for pequena, sequencial, depender de uma única
 cadeia de raciocínio, exigir escrita concorrente nos mesmos arquivos ou tiver
 custo de coordenação maior que o ganho.
 
+## Orquestração contínua e subagentes
+
+Subagentes não são apenas mecanismo de consulta; são mecanismo para avançar
+frentes independentes sem contaminar o contexto principal. O orquestrador deve
+usar subagentes para sustentar execução contínua quando houver trabalho
+paralelizável e seguro.
+
+Delegue para subagentes quando houver:
+
+* investigação independente;
+* leitura de módulos diferentes;
+* inventário;
+* testes e análise de logs;
+* revisão paralela;
+* preparação de insumos;
+* auditoria de partes distintas.
+
+Não use subagentes para escrita concorrente nos mesmos arquivos. Se um subagente
+encontrar bloqueio, o orquestrador deve registrar o bloqueio, avaliar se ele
+bloqueia outras frentes e redistribuir atenção para outra tarefa `Ready` ou
+`Parallelizable`.
+
+O orquestrador deve reconciliar resultados e decidir a sequência seguinte sem
+pedir continuação quando a próxima ação estiver delimitada, autorizada e
+desbloqueada.
+
 ## Roteamento de subagentes
 
 | Modelo | Subtarefas recomendadas |
@@ -116,20 +143,18 @@ custo de coordenação maior que o ganho.
 * Rebaixe modelo e esforço quando testes objetivos puderem validar a tarefa.
 * Escale somente com justificativa baseada em risco, ambiguidade ou abrangência.
 
-## Recomendação da próxima rodada como plano de orquestração
+## Recomendação da próxima execução
 
 Ao final, informe qualquer limitação de ambiente que impeça validar a escolha de
 modelo, esforço ou subagente. Use sempre os nomes exatos da interface e recomende
 a menor configuração de orquestração suficiente:
 
-`Próxima rodada recomendada: orquestrador <Modelo>, esforço <Leve|Médio|Alto|Extra alto|Ultra>; subagentes <nenhum|lista modelo/esforço/função>; suficiência: <motivo curto>; limite: <restrição de contexto/tokens/escopo>; continuidade: <persistida|requer handoff> — <onde retomar>; git: <limpo|pendente> — <último commit/ação>.`
+`Próxima execução: orquestrador <Modelo>, esforço <Leve|Médio|Alto|Extra alto|Ultra>; fila <ready|blocked|empty>: <resumo>; subagentes <nenhum|lista modelo/esforço/função>; decisão humana <não|sim — motivo>; suficiência: <motivo curto>; limite: <restrição de contexto/tokens/escopo>; continuidade: <persistida|requer handoff> — <onde retomar>; git: <limpo|pendente> — <último commit/ação>.`
 
 Exemplos:
 
-`Próxima rodada recomendada: orquestrador 5.6 Luna, esforço Leve; subagentes nenhum; suficiência: commit/push e atualização de issue são ações mecânicas após validação; limite: checar git status e não ampliar escopo; continuidade: persistida na issue ativa; git: limpo — último commit publicado em main.`
+`Próxima execução: orquestrador 5.6 Terra, esforço Médio; fila ready: #18/T3.1; subagentes 2x 5.6 Luna Leve para inventário de UI e testes existentes; decisão humana não; suficiência: issue delimitada e desbloqueada; limite: não iniciar T4.x; continuidade: persistida em issue #18 e ledger TTS; git: limpo — último commit publicado em main.`
 
-`Próxima rodada recomendada: orquestrador 5.6 Terra, esforço Médio; subagentes 2x 5.6 Luna Leve para inventário e busca textual; suficiência: Terra decide plano e Luna executa coleta objetiva; limite: subagentes retornam apenas caminhos, evidências e riscos; continuidade: persistida em ledger/status; git: limpo — último commit publicado em main.`
+`Próxima execução: orquestrador 5.6 Sol, esforço Extra alto; fila ready: auditoria de arquitetura e testes; fila blocked-human: decisão Realtime #8; subagentes 3x 5.6 Terra Médio; decisão humana ainda não, pois há frentes independentes desbloqueadas; limite: não alterar Realtime nativo; continuidade: persistida em plano/ledger; git: limpo — checkpoint publicado.`
 
-`Próxima rodada recomendada: orquestrador 5.6 Sol, esforço Extra alto; subagentes 3x 5.6 Terra Médio para segurança, testes e arquitetura; suficiência: decisão final exige julgamento forte, mas a coleta é paralelizável; limite: subagentes somente leitura, sem edits concorrentes; continuidade: persistida em ADR/plano; git: limpo — último commit publicado em main.`
-
-`Próxima rodada recomendada: orquestrador 5.6 Sol, esforço Ultra; subagentes automáticos/dirigidos conforme decomposição; suficiência: auditoria grande, paralelizável e de alto valor; limite: registrar por que Ultra era necessário e consolidar apenas achados destilados; continuidade: persistida em plano de auditoria; git: pendente — explicar working tree antes de encerrar.`
+`Próxima execução: orquestrador 5.6 Terra, esforço Médio; fila blocked-human: todas as próximas ações dependem da decisão #8; subagentes nenhum; decisão humana sim — escolher estratégia nativa do Realtime 0.5B; suficiência: não há outra frente autorizada e desbloqueada; limite: não improvisar decisão; continuidade: persistida em issue #8; git: limpo — último commit publicado em main.`
