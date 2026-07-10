@@ -170,36 +170,51 @@ Checagem contra o aceite documentado:
 - referência opcional: atendido
 - exclusão do estilo não apaga a voz: atendido
 
-Pontos ainda fora do aceite completo ampliado do ledger atual:
+Itens avaliados e classificados fora do aceite de `T2.2`/`#16`:
 
-- preview por estilo não está implementado
-- UI completa de gerenciamento de estilos não está implementada
-- compatibilidade por engine ainda é metadado, não capability matrix operacional
+- preview por engine real exige rastreio futuro próprio
+- UI completa de gerenciamento de estilos exige decisão e issue próprias
+- capability matrix operacional pertence a uma tarefa posterior
 
-## Subfatias recentes que surgiram sem issue formal
+Esses itens não devem ser tratados como pendências implícitas de `#16`.
 
-Estas subfatias foram executadas dentro de `T2.2`, mas sem ticket dedicado:
+## Evidências operacionais de T2.2
+
+Estas subfatias integram o checklist/evidência da issue `#16` e não geram
+microissues separadas:
 
 - persistência de `instruction`
 - persistência de `parameters`
 - `DELETE` da referência de estilo
 - `GET` da mídia original de estilo
+- duplicação da referência normalizada e do original junto com o estilo
+- falha explícita e sem cópia órfã quando a referência marcada como pronta está
+  incompleta
+- rollback integral da cópia quando a escrita de mídia falha durante a
+  duplicação
 
 Tratamento recomendado:
 
 - não abrir issue separada para cada uma;
-- registrar tudo como checklist de evidências dentro de uma nova issue dedicada a `T2.2`;
-- atualizar o ledger com as evidências já publicadas no código e nos testes.
+- registrar tudo como checklist de evidências dentro da issue `#16`;
+- atualizar o ledger distinguindo o código publicado do diff local ainda não
+  publicado.
 
-## Próxima issue única recomendada
+## Próxima issue única em execução
 
-Abrir uma nova issue AFK dedicada a `T2.2`:
+Continuar exclusivamente na issue AFK dedicada a `T2.2`:
 
 **Título sugerido:** `AFK: Formalizar e concluir T2.2 da entidade Style`
 
-**Motivo:** o código já avançou além do tracker e precisa de um eixo formal único
-para consolidar aceite, evidência, pendências e limites de escopo antes de pular
-para `T2.3` ou para parser/orchestration.
+**Motivo:** o aceite de backend está coberto e testado; falta sincronizar as
+evidências da issue `#16` e publicar o diff local somente após autorização,
+antes de pular para `T2.3` ou para parser/orchestration.
+
+Atualização do tracker em 2026-07-07:
+
+- `#16` `AFK: Formalizar e concluir T2.2 da entidade Style`
+- `#17` `AFK: Implementar T2.3 da entidade Event`
+- `#18` `AFK: Implementar T3.1 de captura real da primeira voz no wizard`
 
 ## Ordem operacional recomendada
 
@@ -277,7 +292,7 @@ Formalizar e concluir a entidade `Style` dentro de cada voz, consolidando o que 
 - [ ] CRUD de estilos permanece coberto por testes de ponta a ponta
 - [ ] `style_id` continua estável mesmo com rename do nome visível
 - [ ] referência opcional de estilo continua normalizada e persistida com mídia original e derivada
-- [ ] ledger é atualizado para refletir o estado real já publicado de `T2.2`
+- [ ] ledger distingue o estado já publicado do diff local de `T2.2`
 - [ ] pendências restantes de `T2.2` ficam explicitadas sem misturar `T2.3` ou `T4.x`
 
 ## Blocked by

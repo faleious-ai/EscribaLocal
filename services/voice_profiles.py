@@ -1052,6 +1052,16 @@ def update_style(
 
 def duplicate_style(voice_id: str, style_id: str, *, name: str) -> Dict[str, Any]:
     source = _load_style(voice_id, style_id)
+    reference_source: Optional[Path] = None
+    original_source: Optional[Path] = None
+    if source.get("reference", {}).get("status") == "ready":
+        reference_source = style_reference_path(voice_id, style_id)
+        original_source = style_original_path(voice_id, style_id)
+        if not reference_source.exists() or not original_source.exists():
+            raise InvalidVoice(
+                "Não foi possível duplicar o estilo: mídia de referência incompleta."
+            )
+
     duplicated = create_style(
         voice_id,
         name=name,
@@ -1061,13 +1071,35 @@ def duplicate_style(voice_id: str, style_id: str, *, name: str) -> Dict[str, Any
         parameters=dict(source.get("parameters", {})),
         engine_compatibility=dict(source.get("engine_compatibility", {})),
     )
+    duplicated_style_id = duplicated["style_id"]
+    try:
+        duplicated_style = _load_style(voice_id, duplicated_style_id)
+        if reference_source is not None and original_source is not None:
+            shutil.copy2(reference_source, style_reference_path(voice_id, duplicated_style_id))
+            shutil.copy2(original_source, style_original_path(voice_id, duplicated_style_id))
+            duplicated_style["reference"] = dict(source.get("reference", {}))
+
+        duplicated_style["updated_at"] = _now_iso()
+        _save_style(voice_id, duplicated_style)
+        _save_profile(_load_profile(voice_id))
+    except Exception as duplicate_error:
+        try:
+            shutil.rmtree(_style_dir(voice_id, duplicated_style_id))
+            _save_profile(_load_profile(voice_id))
+        except Exception as rollback_error:
+            raise RuntimeError(
+                "Falha ao duplicar o estilo e o rollback também falhou: "
+                f"{rollback_error}"
+            ) from duplicate_error
+        raise
+
     record_app_event(
         "voice_style_duplicated",
         voice_id=voice_id,
         style_id=style_id,
-        duplicated_style_id=duplicated["style_id"],
+        duplicated_style_id=duplicated_style_id,
     )
-    return duplicated
+    return _style_public(_load_style(voice_id, duplicated_style_id))
 
 
 def delete_style(voice_id: str, style_id: str) -> Dict[str, Any]:

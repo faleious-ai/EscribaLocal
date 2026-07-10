@@ -640,3 +640,102 @@ def test_style_original_audio_http_fetch(client, fake_builder):
     assert fetched.status_code == 200
     assert fetched.headers["content-type"] == "audio/wav"
     assert fetched.content == source_audio
+
+
+def test_duplicate_style_copies_reference_media(client, fake_builder, isolated_voices):
+    voice = _upload(client, name="Estilo com midia").json()["voice"]
+    style = client.post(
+        f"/api/tts/voices/{voice['id']}/styles",
+        json={"name": "Intimo"},
+    ).json()
+
+    reference_audio = make_speech_wav(seconds=1.8)
+    uploaded_reference = client.post(
+        f"/api/tts/voices/{voice['id']}/styles/{style['style_id']}/reference",
+        files={"file": ("referencia.wav", reference_audio, "audio/wav")},
+    )
+    assert uploaded_reference.status_code == 200, uploaded_reference.text
+
+    duplicated = client.post(
+        f"/api/tts/voices/{voice['id']}/styles/{style['style_id']}/duplicate",
+        json={"name": "Intimo copia"},
+    )
+    assert duplicated.status_code == 200, duplicated.text
+    payload = duplicated.json()
+    assert payload["style_id"] == "intimo-copia"
+    assert payload["reference"]["status"] == "ready"
+
+    duplicated_dir = isolated_voices / voice["id"] / "styles" / payload["style_id"]
+    assert (duplicated_dir / "reference.wav").exists()
+    assert (duplicated_dir / "original.wav").exists()
+
+    original_reference = client.get(f"/api/tts/voices/{voice['id']}/styles/{style['style_id']}/reference")
+    duplicated_reference = client.get(f"/api/tts/voices/{voice['id']}/styles/{payload['style_id']}/reference")
+    assert original_reference.status_code == 200
+    assert duplicated_reference.status_code == 200
+    assert duplicated_reference.content == original_reference.content
+
+
+def test_duplicate_style_rejects_missing_ready_reference_media(client, fake_builder, isolated_voices):
+    voice = _upload(client, name="Estilo inconsistente").json()["voice"]
+    style = client.post(
+        f"/api/tts/voices/{voice['id']}/styles",
+        json={"name": "Serio"},
+    ).json()
+
+    uploaded = client.post(
+        f"/api/tts/voices/{voice['id']}/styles/{style['style_id']}/reference",
+        files={"file": ("referencia.wav", make_speech_wav(seconds=1.8), "audio/wav")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+
+    style_dir = isolated_voices / voice["id"] / "styles" / style["style_id"]
+    (style_dir / "reference.wav").unlink()
+
+    duplicated = client.post(
+        f"/api/tts/voices/{voice['id']}/styles/{style['style_id']}/duplicate",
+        json={"name": "Serio copia"},
+    )
+
+    assert duplicated.status_code == 422
+    assert "refer" in duplicated.json()["detail"]["message"].lower()
+    listed = client.get(f"/api/tts/voices/{voice['id']}/styles").json()["items"]
+    assert [item["style_id"] for item in listed] == [style["style_id"]]
+
+
+def test_duplicate_style_rolls_back_when_media_copy_fails(
+    client,
+    fake_builder,
+    isolated_voices,
+    monkeypatch,
+):
+    voice = _upload(client, name="Estilo com falha de copia").json()["voice"]
+    style = client.post(
+        f"/api/tts/voices/{voice['id']}/styles",
+        json={"name": "Firme"},
+    ).json()
+    uploaded = client.post(
+        f"/api/tts/voices/{voice['id']}/styles/{style['style_id']}/reference",
+        files={"file": ("referencia.wav", make_speech_wav(seconds=1.8), "audio/wav")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+
+    def fail_copy(*_args, **_kwargs):
+        raise OSError("falha de disco simulada")
+
+    monkeypatch.setattr(voice_profiles.shutil, "copy2", fail_copy)
+    duplicated = client.post(
+        f"/api/tts/voices/{voice['id']}/styles/{style['style_id']}/duplicate",
+        json={"name": "Firme copia"},
+    )
+
+    assert duplicated.status_code == 500
+    assert duplicated.json()["detail"] == "falha de disco simulada"
+    profile_path = isolated_voices / voice["id"] / "profile.json"
+    persisted = json.loads(profile_path.read_text(encoding="utf-8"))
+    assert [item["style_id"] for item in persisted["styles"]["items"]] == [style["style_id"]]
+    duplicate_dir = isolated_voices / voice["id"] / "styles" / "firme-copia"
+    assert not duplicate_dir.exists()
+
+    listed = client.get(f"/api/tts/voices/{voice['id']}/styles").json()["items"]
+    assert [item["style_id"] for item in listed] == [style["style_id"]]

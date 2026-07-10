@@ -32,6 +32,7 @@ As skills em si normalmente **não** ficam versionadas dentro deste repositório
 Leia quando aplicável:
 
 * `docs/agents/skills-runtime.md`
+* `docs/agents/MODEL_ROUTING.md`
 
 ### Issues e PRDs
 
@@ -124,25 +125,36 @@ Mudança arquitetural:
 
 Não execute automaticamente todo o fluxo de uma vez. Use somente a etapa apropriada ao estado atual e avance quando a saída necessária da etapa anterior existir.
 
-## Recomendação para a próxima rodada
+## Modelos, esforço e subagentes
 
-Ao concluir uma etapa ou responder sobre próximos passos, inclua sempre uma linha curta recomendando o modelo e o nível de esforço para a próxima rodada, identificando qual plataforma está em uso no momento e fornecendo a recomendação pertinente:
+A política normativa do ambiente Codex está em
+`docs/agents/MODEL_ROUTING.md`. Use os nomes exatos da interface:
 
-* **Na plataforma Codex**:
-  * `GPT-5.5` — para tarefas complexas, arquitetura, integrações amplas e debugging difícil.
-  * `GPT-5.4` — para implementação cotidiana com bom equilíbrio entre qualidade e custo.
-  * `GPT-5.4-Mini` — para perguntas simples, revisão rápida, documentação e edições mecânicas.
-  * `Codex Auto Review` — para rodadas focadas apenas em revisão automática de código/diff.
-* **Na plataforma Antigravity**:
-  * `Claude Sonnet 4.6 (Thinking)` ou `Gemini 3.1 Pro (High)` — para tarefas complexas, arquitetura, integrações e debugging difícil.
-  * `Gemini 3.1 Pro (Low)` ou `Gemini 3.5 Flash (High)` — para implementação cotidiana e tarefas gerais.
-  * `Gemini 3.5 Flash (Low)` ou `Gemini 3.5 Flash (Medium)` — para perguntas simples, revisões, edições mecânicas ou documentação.
+* modelos: `5.6 Sol`, `5.6 Terra`, `5.6 Luna`, `5.5`, `5.4` e `5.4 Mini`;
+* esforços: `Leve`, `Médio`, `Alto`, `Extra alto` e `Ultra`.
 
-Formato preferido:
+Regras obrigatórias:
 
-`Próxima rodada recomendada: modelo <Modelo Recomendado>, esforço <baixo|médio|alto|muito alto> — <motivo curto>.`
+* use o menor modelo e o menor esforço suficientes para entregar com segurança,
+  evidência, validação e qualidade aceitável;
+* não use o modelo mais forte, esforço alto ou `Ultra` como padrão;
+* mantenha objetivo, escopo, riscos, orçamento de tokens e decisão final no
+  agente principal;
+* use subagentes somente para partes independentes, delimitadas e com ganho
+  material de qualidade, cobertura ou tempo;
+* escolha subagentes mais baratos quando forem suficientes e valide seus
+  achados antes de incorporá-los;
+* registre por que um modelo mais caro, esforço maior ou `Ultra` foi necessário;
+* não carregue o repositório inteiro por padrão: comece por mapa, busca dirigida
+  e leitura sob demanda.
 
-Use esforço baixo para perguntas simples ou edições mecânicas, médio para implementações localizadas com testes, alto para arquitetura/integrações/bugs difíceis e muito alto apenas quando a próxima rodada exigir exploração profunda, alto risco ou múltiplas decisões encadeadas.
+Ao concluir uma etapa ou recomendar a próxima rodada, use:
+
+`Próxima rodada recomendada: modelo <Modelo>, esforço <Leve|Médio|Alto|Extra alto|Ultra> — <motivo curto>.`
+
+Não recomende capacidade acima da necessária. Quando a tarefa seguinte for
+pequena, mecânica e diretamente validável, prefira `5.6 Luna` ou `5.4 Mini`
+com esforço `Leve`.
 
 ## Proteções
 
