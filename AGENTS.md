@@ -1,108 +1,65 @@
 # AGENTS.md
 
-Sempre se comunique com o usuário em português do Brasil (pt-BR), inclusive em perguntas, explicações, relatórios e conclusões. Preserve em inglês apenas código, comandos, caminhos, identificadores e termos técnicos cuja tradução possa causar ambiguidade.
+Este arquivo é o bootloader operacional obrigatório do repositório. Ele deve
+ficar enxuto: carregue sempre este arquivo primeiro e recupere os detalhes sob
+demanda pelos documentos indicados abaixo.
 
-## Configuração do projeto
+Sempre se comunique com o usuário em português do Brasil (pt-BR), inclusive em
+perguntas, explicações, relatórios e conclusões. Preserve em inglês apenas
+código, comandos, caminhos, identificadores e termos técnicos cuja tradução possa
+causar ambiguidade.
 
-### Regime de trabalho Git
+## Bootstrap de sessão limpa
 
-Decisão operacional vigente: todo trabalho deve acontecer diretamente em
-`main`. Não crie branches de trabalho, branches `codex/*` ou branches paralelas
-sem uma instrução explícita posterior do usuário revogando esta decisão.
+Ao receber “Execute o AGENTS.md e continue”:
 
-Se encontrar trabalho em outra branch, consolide-o em `main` antes de
-continuar, preservando alterações locais e sem descartar commits. Depois da
-consolidação local, remova a branch paralela local quando ela não for mais
-necessária.
+1. leia este arquivo;
+2. carregue `docs/agents/CONTINUATION.md`;
+3. inspecione `git status --short --branch` quando houver ambiente local
+   disponível;
+4. identifique a tarefa ativa por issues, planos, ledgers, documentos de status e
+   arquivos modificados;
+5. leia apenas os documentos de continuidade diretamente aplicáveis;
+6. reconstrua objetivo, escopo, fora de escopo, critérios de aceite, testes
+   mínimos, próxima ação e critério de parada;
+7. continue autonomamente quando houver uma única issue delimitada
+   `ready-for-agent` e nenhuma decisão humana pendente;
+8. peça decisão objetiva ao usuário se houver ambiguidade real sobre qual tarefa
+   continuar ou se houver decisão humana pendente.
 
-### Autorização permanente para issues delimitadas
+Não carregue o repositório inteiro por padrão. Comece por mapa, busca dirigida e
+leitura sob demanda.
 
-Decisão operacional vigente: o usuário autoriza permanentemente o agente a
-realizar, sem pedir ou aguardar nova confirmação, todas as ações necessárias
-para concluir uma issue delimitada deste repositório.
+## Matriz de carregamento sob demanda
 
-Uma issue está delimitada quando:
+| Situação | Carregar |
+| --- | --- |
+| Sessão limpa, “continue”, fim de rodada ou risco de perda de contexto | `docs/agents/CONTINUATION.md` |
+| Issue, commit, push, branch, autonomia ou ação remota no GitHub | `docs/agents/AUTONOMY_AND_GIT.md`, `docs/agents/issue-tracker.md`, `docs/agents/triage-labels.md` |
+| Tarefa não trivial ou escolha de skill | `docs/agents/SKILL_ROUTING.md` |
+| Escolha de modelo, esforço, orquestrador ou subagentes | `docs/agents/MODEL_ROUTING.md` |
+| Tarefa de domínio, produto ou TTS | `CONTEXT.md`, depois documentos indicados por ele |
+| TTS atual | `docs/tts/EXECUTION_STATUS.md`, `docs/tts/ISSUE_EXECUTION_PLAN.md` e issue ativa |
+| Arquitetura ou decisão técnica | ADRs relevantes em `docs/adr/` |
+| Ambiente das skills | `docs/agents/skills-runtime.md` |
 
-* pertence a `faleious-ai/EscribaLocal` e está identificada por número ou título;
-* possui objetivo, escopo, fora de escopo, critérios de aceite e critério de
-  parada claros na própria issue ou nos documentos de precedência do projeto;
-* está `ready-for-agent` ou foi escolhida explicitamente pelo usuário;
-* não depende de decisão humana pendente, informação ausente ou ampliação de
-  escopo.
+## Contexto de domínio
 
-Dentro desses limites, estão previamente autorizados:
+Este é um repositório de contexto único. Antes de planejar ou modificar
+comportamento não trivial de domínio/produto, leia `CONTEXT.md` e siga a ordem de
+precedência definida ali.
 
-* leitura, edição, testes, instalação de dependências necessárias e atualização
-  de documentação, ledger e planos;
-* commits e push diretamente em `main`;
-* comentários, edição, labels, fechamento ou reabertura de GitHub Issues;
-* outras alterações remotas no próprio repositório exigidas pelo aceite;
-* tag, release ou deploy somente quando forem requisitos explícitos da issue.
-
-A autorização não permite criar branches, ampliar o escopo, reescrever histórico,
-usar comandos Git destrutivos, apagar dados não pertencentes à issue, modificar
-segredos reais ou atuar em sistemas externos que não estejam explicitamente no
-escopo. Issues `ready-for-human`, `needs-info`, `needs-triage` ou bloqueadas por
-decisão humana exigem resolver esse estado antes da execução autônoma.
-
-O agente deve executar testes e revisão proporcionais ao risco, registrar
-evidências no tracker/ledger, respeitar o critério de parada e relatar as ações
-remotas depois de concluí-las; não deve interromper o fluxo apenas para pedir
-autorização já concedida por este protocolo.
-
-### Skills e ambiente do agente
-
-Este repositório versiona:
-
-* instruções de operação em `AGENTS.md`;
-* contexto e convenções em `docs/agents/`;
-* documentação de domínio em `docs/`, `CONTEXT.md` e ADRs.
-
-As skills em si normalmente **não** ficam versionadas dentro deste repositório. Elas costumam estar instaladas no ambiente do agente (por exemplo, em diretórios do Codex/Claude/Gemini CLI) e são apenas **roteadas** por estas instruções.
-
-Leia quando aplicável:
-
-* `docs/agents/skills-runtime.md`
-* `docs/agents/MODEL_ROUTING.md`
-
-### Issues e PRDs
-
-Issues e PRDs são gerenciados no GitHub Issues de `faleious-ai/EscribaLocal`.
-
-Leia quando aplicável:
-
-* `docs/agents/issue-tracker.md`
-
-### Triagem
-
-Este repositório utiliza os rótulos:
-
-* `needs-triage`
-* `needs-info`
-* `ready-for-agent`
-* `ready-for-human`
-* `wontfix`
-
-Detalhes:
-
-* `docs/agents/triage-labels.md`
-
-### Contexto de domínio
-
-Este é um repositório de contexto único.
-
-Antes de planejar ou modificar comportamento não trivial, leia:
-
-* `CONTEXT.md`;
-* ADRs aplicáveis em `docs/adr/`;
-* documentação relacionada em `docs/`;
-* instruções aplicáveis em `docs/agents/`.
+Para o subsistema TTS, `CONTEXT.md` aponta as fontes de verdade vigentes. Não
+trate PRDs e prompts históricos como escopo ativo quando divergirem do escopo
+consolidado atual.
 
 Não pergunte ao usuário algo que possa ser descoberto examinando o repositório.
 
 ## Roteamento obrigatório de skills
 
-Antes de planejar, editar arquivos ou executar mudanças, classifique a tarefa e use explicitamente a skill instalada mais apropriada.
+Antes de planejar, editar arquivos ou executar mudanças, classifique a tarefa e
+use explicitamente a skill instalada mais apropriada. Para tarefas não triviais,
+carregue `docs/agents/SKILL_ROUTING.md`.
 
 Informe no início da resposta:
 
@@ -112,49 +69,8 @@ Quando a tarefa for realmente trivial:
 
 `Roteamento: execução direta — tarefa trivial e completamente especificada`
 
-Considere trivial apenas uma alteração localizada, mecânica, reversível e sem decisões de produto, arquitetura, domínio, segurança, integração ou experiência do usuário.
-
-### Regras de roteamento
-
-* Use `$setup-matt-pocock-skills` quando a configuração das skills, dos documentos de domínio, dos ADRs, das labels ou do issue tracker estiver ausente ou inconsistente.
-
-* Use `$grill-with-docs` antes de implementar uma nova funcionalidade, integração ou mudança relevante que ainda possua ambiguidades, decisões abertas ou múltiplas soluções possíveis. Explore primeiro o código e os documentos. Faça uma pergunta por vez e apresente uma recomendação.
-
-* Use `$to-prd` quando os requisitos já estiverem suficientemente resolvidos e precisarem virar uma especificação implementável. Não invente requisitos nem comece uma nova entrevista extensa.
-
-* Use `$to-issues` quando existir um PRD ou uma especificação aprovada que precise ser dividida em unidades executáveis. Prefira fatias verticais, pequenas, demonstráveis e testáveis.
-
-* Use `$tdd` para implementar comportamento bem definido. Trabalhe em ciclos pequenos: teste falhando, implementação mínima, teste passando e refatoração.
-
-* Use `$diagnose` antes de corrigir bugs cuja causa raiz ainda seja desconhecida. Primeiro reproduza, reúna evidências, teste hipóteses e identifique a causa; depois implemente a correção com `$tdd` quando aplicável.
-
-* Use `$improve-codebase-architecture` para auditoria arquitetural, acoplamento excessivo, modularização ou refatoração estrutural. Não transforme automaticamente uma auditoria em reescrita geral.
-
-* Use `$prototype` quando uma dúvida técnica puder ser resolvida com um experimento pequeno, isolado e descartável.
-
-* Use `$review` ao concluir mudanças relevantes ou quando o usuário solicitar revisão do código ou do diff.
-
-* Use `$qa` quando os critérios de aceite exigirem validação integrada, de interface, API ou fluxo ponta a ponta.
-
-* Use `$handoff` quando o trabalho precisar continuar em outra sessão ou quando houver risco de perda de contexto.
-
-Use apenas skills realmente instaladas. Nunca afirme ter usado uma skill que não foi carregada.
-
-## Fluxos padrão
-
-Nova funcionalidade:
-
-`$grill-with-docs → $to-prd → $to-issues → $tdd → $review → $qa quando aplicável`
-
-Bug sem causa conhecida:
-
-`$diagnose → $tdd → $review`
-
-Mudança arquitetural:
-
-`$improve-codebase-architecture → $to-prd quando necessário → $to-issues → $tdd → $review`
-
-Não execute automaticamente todo o fluxo de uma vez. Use somente a etapa apropriada ao estado atual e avance quando a saída necessária da etapa anterior existir.
+Use apenas skills realmente instaladas. Nunca afirme ter usado uma skill que não
+foi carregada.
 
 ## Modelos, esforço e subagentes
 
@@ -164,38 +80,44 @@ A política normativa do ambiente Codex está em
 * modelos: `5.6 Sol`, `5.6 Terra`, `5.6 Luna`, `5.5`, `5.4` e `5.4 Mini`;
 * esforços: `Leve`, `Médio`, `Alto`, `Extra alto` e `Ultra`.
 
-Regras obrigatórias:
+Regra permanente: use o menor orquestrador, menor esforço e menores subagentes
+suficientes para entregar com segurança, evidência, validação e qualidade
+aceitável. Não use o modelo mais forte, esforço alto ou `Ultra` como padrão.
 
-* use o menor modelo e o menor esforço suficientes para entregar com segurança,
-  evidência, validação e qualidade aceitável;
-* não use o modelo mais forte, esforço alto ou `Ultra` como padrão;
-* mantenha objetivo, escopo, riscos, orçamento de tokens e decisão final no
-  agente principal;
-* use subagentes somente para partes independentes, delimitadas e com ganho
-  material de qualidade, cobertura ou tempo;
-* escolha subagentes mais baratos quando forem suficientes e valide seus
-  achados antes de incorporá-los;
-* registre por que um modelo mais caro, esforço maior ou `Ultra` foi necessário;
-* não carregue o repositório inteiro por padrão: comece por mapa, busca dirigida
-  e leitura sob demanda.
+## GitHub como memória recuperável
 
-Ao concluir uma etapa ou recomendar a próxima rodada, use:
+O GitHub é a fonte primária de continuidade. Ao final de qualquer rodada não
+trivial, o estado recuperável deve estar no repositório por commits, issues,
+ledgers, planos ou documentos de status.
 
-`Próxima rodada recomendada: modelo <Modelo>, esforço <Leve|Médio|Alto|Extra alto|Ultra> — <motivo curto>.`
+Se houve progresso útil, faça commit e push em `main`, respeitando
+`docs/agents/AUTONOMY_AND_GIT.md`. Se a rodada não puder ser publicada, explique
+o bloqueio e registre a continuidade em issue, ledger ou documento de status.
+Não deixe a memória da tarefa depender apenas do chat.
 
-Não recomende capacidade acima da necessária. Quando a tarefa seguinte for
-pequena, mecânica e diretamente validável, prefira `5.6 Luna` ou `5.4 Mini`
-com esforço `Leve`.
+`$handoff` é exceção: use somente quando a continuidade necessária ainda não
+estiver suficientemente persistida no repositório e não puder ser persistida
+antes do encerramento.
 
-## Proteções
+## Proteções críticas
 
-* Inspecione `git status` antes de editar.
+* Inspecione `git status` antes de editar quando houver ambiente local.
 * Não descarte nem sobrescreva alterações existentes do usuário.
 * Não amplie o escopo sem autorização.
 * Não reescreva a aplicação quando uma alteração incremental for viável.
 * Não exponha nem modifique segredos ou credenciais reais.
-* Para issues delimitadas, use a autorização permanente deste arquivo e conclua
-  autonomamente commits, push e atualizações remotas necessárias; fora desses
-  limites, obtenha decisão explícita do usuário.
+* Para issues delimitadas, siga `docs/agents/AUTONOMY_AND_GIT.md` e conclua
+  autonomamente commits, push e atualizações remotas necessárias.
+* Fora desses limites, obtenha decisão explícita do usuário.
 * Execute testes e verificações relevantes antes de declarar o trabalho concluído.
 * Revise o diff final e informe verificações que não puderam ser executadas.
+
+## Recomendação final obrigatória
+
+Ao concluir uma etapa ou recomendar a próxima rodada, use o formato:
+
+`Próxima rodada recomendada: orquestrador <Modelo>, esforço <Leve|Médio|Alto|Extra alto|Ultra>; subagentes <nenhum|lista modelo/esforço/função>; suficiência: <motivo curto>; limite: <restrição de contexto/tokens/escopo>; continuidade: <persistida|requer handoff> — <onde retomar>; git: <limpo|pendente> — <último commit/ação>.`
+
+Não recomende capacidade acima da necessária. Quando a tarefa seguinte for
+pequena, mecânica e diretamente validável, prefira `5.6 Luna` ou `5.4 Mini` com
+esforço `Leve`.
