@@ -1,0 +1,61 @@
+name: Defect / contract violation
+description: Falha comprovada contra contrato, aceite ou comportamento esperado
+title: "BUG: "
+labels:
+  - needs-triage
+body:
+  - type: textarea
+    id: contract
+    attributes:
+      label: Contrato violado
+      description: Especificação, critério de aceite, ADR ou invariante afetado.
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Comportamento observado
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Comportamento esperado
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidência
+      description: Reprodução, teste, trecho, log ou auditoria.
+    validations:
+      required: true
+  - type: dropdown
+    id: origin
+    attributes:
+      label: Classificação
+      options:
+        - Regressão
+        - Dívida preexistente
+        - Aceite incompleto
+        - Inconsistência documental
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Issue, gate e dependentes afetados
+    validations:
+      required: true
+  - type: textarea
+    id: guard
+    attributes:
+      label: Teste ou barreira contra recorrência
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Limite da correção
+    validations:
+      required: true
