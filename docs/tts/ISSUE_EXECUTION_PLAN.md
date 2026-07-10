@@ -101,9 +101,9 @@ Issues históricas fechadas relevantes:
 | `T0.1`, `T0.2`, `T1.1`, `T1.2`, `T1.3`, `T9.3`, `T10.1` | histórico disperso em `#1`, `#2`, `#5`, `#6`, `#13` | Gate A auditável e coerente |
 | `T2.1` | sem issue clara | implementado e verificado no ledger; precisa rastreio histórico mínimo |
 | `T2.2` | `#16` | verificada no ledger e fechada como concluída |
-| `T2.3` | `#17` | triada como `ready-for-agent`; implementação e testes concluídos localmente, aguardando publicação e fechamento |
+| `T2.3` | `#17` | verificada no ledger e fechada como `completed` pelo commit `c728eb87` |
 | `T2.4` | sem issue clara | parcialmente coberta por capabilities de import/export de voz, mas não por pacote versionado completo com estilos/eventos |
-| `T3.1` | `#7` (parcial / insuficiente) | issue fechada não cobre todo o aceite do escopo consolidado |
+| `T3.1` | `#18`; `#7` como histórico parcial | `#18` é a issue operacional vigente e aguarda triagem; `#7` não cobre todo o aceite consolidado |
 | `T3.2`, `T3.3` | sem issue clara | ainda não rastreadas |
 | `T4.1` | sem issue clara | ainda não rastreada |
 | `T4.2` | `#9` (parcial / insuficiente) | implementação atual cobre só parte do objetivo |
@@ -204,35 +204,39 @@ Tratamento recomendado:
 - manter o ledger alinhado aos commits `03e28743`/`ff81eb75` e ao fechamento da
   issue `#16`.
 
-## T2.2 encerrada e T2.3 em conclusão
+## T2.2 e T2.3 encerradas; T3.1 aguarda triagem
 
-Issue concluída:
+Issues concluídas:
 
 - `#16` `AFK: Formalizar e concluir T2.2 da entidade Style` — fechada como
   `completed` após sincronização de aceite, testes e evidências.
+- `#17` `AFK: Implementar T2.3 da entidade Event` — fechada como `completed`
+  após publicação de `c728eb87`, revisão, suíte completa e sincronização das
+  evidências.
 
-Issue operacional atual:
+Próxima candidata única para triagem:
 
-- `#17` `AFK: Implementar T2.3 da entidade Event` — triada como
-  `ready-for-agent`; implementação e suíte completa concluídas localmente em
-  2026-07-10. Restam publicação, sincronização das evidências e fechamento.
+- `#18` `AFK: Implementar T3.1 de captura real da primeira voz no wizard` —
+  aberta como `needs-triage`; não iniciar implementação antes do Agent Brief e
+  da transição formal para `ready-for-agent` ou outro estado adequado.
 
-Atualização do tracker em 2026-07-09:
+Atualização do tracker até 2026-07-10:
 
 - `#16` fechada como `completed`
-- `#17` criada como `needs-triage`; posteriormente triada para `ready-for-agent`
-- `#18` `AFK: Implementar T3.1 de captura real da primeira voz no wizard`
+- `#17` triada, implementada e fechada como `completed`
+- evidências de `#17`: https://github.com/faleious-ai/EscribaLocal/issues/17#issuecomment-4933795039
+- `#18` permanece aberta como `needs-triage`
 
 ## Ordem operacional recomendada
 
 1. `T2.2 — Formalizar e concluir entidade Style` — concluída
-2. `T2.3 — Implementar entidade Event` — em conclusão pela issue `#17`
-3. `T3.1 — Captura real da primeira voz no wizard` — próxima candidata, somente após fechar `#17` e triar `#18`
+2. `T2.3 — Implementar entidade Event` — concluída pela issue `#17`
+3. `T3.1 — Captura real da primeira voz no wizard` — próxima candidata, somente após triar `#18`
 4. proposta de divisão `T4.x / T5.x / T6.x / T7.x`
 
 Regra de governança:
 
-- não puxar `T4.x` ou posterior antes de concluir `T2.3` e formalizar a ordem de
+- não puxar `T4.x` ou posterior antes de triar `#18` e formalizar a ordem de
   execução posterior;
 - não tratar `#12` como próxima execução operacional;
 - não deixar subfatias de `Style` nascerem fora da issue dedicada.
@@ -242,11 +246,12 @@ Regra de governança:
 ### Fechadas
 
 - `#16` — aceite e evidências consolidados; fechada como `completed`
+- `#17` — aceite e evidências consolidados; fechada como `completed`
 
-### Em conclusão
+### Próxima triagem
 
-- `#17` — implementação e testes locais concluídos; aguarda commit publicado,
-  checklist/evidências no tracker e fechamento
+- `#18` — manter como `needs-triage` até revisar código real do wizard,
+  dependências e critério de prontidão
 
 ### Dividir
 
