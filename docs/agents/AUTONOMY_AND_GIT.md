@@ -82,6 +82,17 @@ Os commits devem ser pequenos o suficiente para revisão, descritivos,
 preferencialmente verdes, acompanhados de testes proporcionais ao risco e sem
 misturar tarefas independentes.
 
+## Checkpoint sem interrupção desnecessária
+
+Fazer commit/push ao concluir uma etapa útil não significa parar a rodada. Após
+cada checkpoint publicado, o agente deve reavaliar a fila e continuar se houver
+próxima tarefa delimitada, autorizada e desbloqueada.
+
+GitHub deve funcionar como memória incremental durante a execução, não como sinal
+automático de parada. O agente deve parar apenas quando o próximo passo exigir
+decisão humana que bloqueie todas as próximas ações úteis ou quando não houver
+mais trabalho seguro a fazer.
+
 ## Commits vermelhos
 
 Não use commit vermelho em `main` como padrão.
