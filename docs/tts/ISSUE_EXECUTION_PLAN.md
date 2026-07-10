@@ -32,7 +32,7 @@ RenderPlan com engines, geração, UI ou montagem de áudio.
   ↓
 #23 / T4.3 — done
   ↓
-#24 / T5.1 — ready após reabertura
+#24 / T5.1 — ready, reaberta
   ↓
 #25 / T5.2 — blocked-technical
 ```
@@ -44,7 +44,7 @@ RenderPlan com engines, geração, UI ou montagem de áudio.
 | T4.1 | #21 | Done | gramática e revisão documental | preservar contrato |
 | T4.2 | #22 | Done | testes focais e suíte registrados | preservar AST |
 | T4.3 | #23 | Done | validação pura e suíte registradas | preservar fronteira |
-| T5.1 | #24 | Partial / Ready | manifesto básico e `260 passed`; aceite de seção ausente | reabrir, corrigir e provar aceite |
+| T5.1 | #24 | Partial / Ready | manifesto básico e `260 passed`; aceite de seção ausente | corrigir e provar aceite |
 | T5.2 | #25 | Blocked-technical | contrato aprofundado, sem implementação | aguardar #24 |
 
 ## Critério de entrada de uma issue
@@ -120,9 +120,10 @@ Configuração desejada:
 - dependências nativas na ordem do DAG.
 
 O conector usado nesta rodada não expõe criação de Project, milestone, sub-issues
-ou dependências nativas. Até configuração por UI/CLI, #26, este plano e os corpos
-das issues são a representação operacional; não declarar esses recursos como
-criados.
+ou dependências nativas. A configuração está em
+`docs/tts/GITHUB_PROJECT_SETUP.md`. Até execução por UI/CLI, #26, este plano e os
+corpos das issues são a representação operacional; não declarar esses recursos
+como criados.
 
 ## Regra de manutenção
 
