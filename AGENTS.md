@@ -70,6 +70,12 @@ delimitada e autorizada, o orquestrador deve reavaliar a fila e continuar pela
 próxima tarefa. Só pode encerrar a rodada quando o trabalho tiver realmente
 terminado ou quando um bloqueio humano impedir todas as próximas ações úteis.
 
+Enquanto a fila tiver qualquer item `Ready`, o agente **não deve enviar resposta
+final, resumo de status, recomendação de próxima execução nem devolver o turno ao
+usuário**. Deve manter o loop de trabalho: executar → validar → publicar
+checkpoint → reavaliar a fila → executar o próximo item. Uma resposta final só é
+permitida com fila `empty` ou `blocked-human` para todas as ações úteis.
+
 Um bloqueio humano existe somente quando falta uma decisão, aprovação, acesso ou
 validação que não possa ser descoberta nem resolvida com segurança no repositório.
 Ele não impede o avanço de frentes independentes prontas.
