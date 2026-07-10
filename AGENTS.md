@@ -17,8 +17,7 @@ Quando recomeçar o trabalho em uma sessão com o contexto limpo:
 2. carregue `docs/agents/CONTINUATION.md`;
 3. carregue `docs/agents/AUTONOMOUS_RUNWAY.md` quando houver fila, backlog,
    múltiplas frentes ou continuidade autônoma;
-4. inspecione `git status --short --branch` quando houver ambiente local
-   disponível;
+4. inspecione `git status --short --branch` quando houver ambiente local;
 5. identifique a tarefa ativa por issues, planos, ledgers, documentos de status e
    arquivos modificados;
 6. leia apenas os documentos de continuidade diretamente aplicáveis;
@@ -37,12 +36,15 @@ leitura sob demanda.
 | Situação | Carregar |
 | --- | --- |
 | Sessão limpa, “continue”, fim de rodada ou risco de perda de contexto | `docs/agents/CONTINUATION.md` |
-| Fila de tarefas, backlog, múltiplas frentes, bloqueios ou execução contínua | `docs/agents/AUTONOMOUS_RUNWAY.md` |
-| Issue, commit, push, branch, autonomia ou ação remota no GitHub | `docs/agents/AUTONOMY_AND_GIT.md`, `docs/agents/issue-tracker.md`, `docs/agents/triage-labels.md` |
+| Fila, backlog, múltiplas frentes, bloqueios ou execução contínua | `docs/agents/AUTONOMOUS_RUNWAY.md` |
+| Issue, commit, push, branch, autonomia ou ação remota | `docs/agents/AUTONOMY_AND_GIT.md`, `docs/agents/issue-tracker.md`, `docs/agents/triage-labels.md` |
 | Tarefa não trivial ou escolha de skill | `docs/agents/SKILL_ROUTING.md` |
 | Escolha de modelo, esforço, orquestrador ou subagentes | `docs/agents/MODEL_ROUTING.md` |
-| Tarefa de domínio, produto ou TTS | `CONTEXT.md`, depois documentos indicados por ele |
-| TTS atual | `docs/tts/EXECUTION_STATUS.md`, `docs/tts/ISSUE_EXECUTION_PLAN.md` e issue ativa |
+| Tarefa de domínio ou produto | `CONTEXT.md`, depois documentos indicados por ele |
+| TTS atual | `docs/tts/CURRENT_RUNWAY.md`, depois issue ativa e `docs/tts/README.md` |
+| TTS com fila/dependências | `docs/tts/ISSUE_EXECUTION_PLAN.md` |
+| TTS com necessidade de evidência/histórico | `docs/tts/EXECUTION_STATUS.md` |
+| RenderPlan / Gate C | `docs/tts/RENDERPLAN_CONTRACT.md` |
 | Arquitetura ou decisão técnica | ADRs relevantes em `docs/adr/` |
 | Ambiente das skills | `docs/agents/skills-runtime.md` |
 
@@ -52,108 +54,87 @@ Este é um repositório de contexto único. Antes de planejar ou modificar
 comportamento não trivial de domínio/produto, leia `CONTEXT.md` e siga a ordem de
 precedência definida ali.
 
-Para o subsistema TTS, `CONTEXT.md` aponta as fontes de verdade vigentes. Não
-trate PRDs e prompts históricos como escopo ativo quando divergirem do escopo
-consolidado atual.
+Para TTS, o estado atual nunca é inferido de documentos genéricos de agentes.
+Leia `docs/tts/CURRENT_RUNWAY.md`; use a especificação para decisões, a issue ativa
+como contrato executável e o ledger para evidências. Não trate PRDs, drafts ou
+propostas históricas como fila ativa.
 
 Não pergunte ao usuário algo que possa ser descoberto examinando o repositório.
 
 ## Execução autônoma contínua
 
-Protocolo rígido: o orquestrador deve seguir este `AGENTS.md` e executar
-continuamente todo trabalho delimitado, autorizado e desbloqueado. Checkpoint,
-commit, push, comentário em issue, fechamento de issue ou conclusão de uma
-microtarefa **não são motivos para parar**.
+O orquestrador deve executar continuamente todo trabalho delimitado, autorizado e
+desbloqueado. Checkpoint, commit, push, comentário em issue, fechamento de issue
+ou conclusão de microtarefa não são motivos para parar.
 
-Enquanto houver tarefa agendada em issue, plano, ledger ou fila que seja segura,
-delimitada e autorizada, o orquestrador deve reavaliar a fila e continuar pela
-próxima tarefa. Só pode encerrar a rodada quando o trabalho tiver realmente
-terminado ou quando um bloqueio humano impedir todas as próximas ações úteis.
+Enquanto houver item `Ready`, o agente não deve devolver o turno. Deve manter o
+loop: executar → validar → publicar checkpoint → atualizar memória → reavaliar a
+fila → executar o próximo item.
 
-Enquanto a fila tiver qualquer item `Ready`, o agente **não deve enviar resposta
-final, resumo de status, recomendação de próxima execução nem devolver o turno ao
-usuário**. Deve manter o loop de trabalho: executar → validar → publicar
-checkpoint → reavaliar a fila → executar o próximo item. Uma resposta final só é
-permitida com fila `empty` ou `blocked-human` para todas as ações úteis.
+Um bloqueio humano existe somente quando falta decisão, aprovação, acesso ou
+validação que não possa ser descoberta nem resolvida com segurança no repo. Ele
+não impede frentes independentes prontas.
 
-Um bloqueio humano existe somente quando falta uma decisão, aprovação, acesso ou
-validação que não possa ser descoberta nem resolvida com segurança no repositório.
-Ele não impede o avanço de frentes independentes prontas.
+Quando houver bloqueio humano, use a seção `**BLOQUEIO HUMANO**` e informe:
 
-Quando houver bloqueio humano, a resposta deve conter uma seção visualmente
-destacada intitulada `**BLOQUEIO HUMANO**`, informando de forma objetiva:
+- o que a pessoa precisa fazer;
+- opções concretas;
+- recomendação e consequências;
+- tarefas que continuam executáveis.
 
-* o que a pessoa precisa fazer;
-* as opções concretas disponíveis;
-* a recomendação do agente e a consequência de cada opção;
-* quais tarefas continuam executáveis enquanto a decisão não chega.
-
-Não peça continuação, confirmação genérica ou autorização já concedida por este
-arquivo. Não pare apenas porque uma etapa foi publicada.
+Não peça continuação, confirmação genérica ou autorização já concedida.
 
 ## Roteamento obrigatório de skills
 
 Antes de planejar, editar arquivos ou executar mudanças, classifique a tarefa e
-use explicitamente a skill instalada mais apropriada. Para tarefas não triviais,
+use explicitamente a skill instalada mais apropriada. Para tarefa não trivial,
 carregue `docs/agents/SKILL_ROUTING.md`.
 
-Informe no início da resposta:
+Informe no início:
 
 `Roteamento: $nome-da-skill — motivo`
 
-Quando a tarefa for realmente trivial:
+Para tarefa realmente trivial:
 
 `Roteamento: execução direta — tarefa trivial e completamente especificada`
 
-Use apenas skills realmente instaladas. Nunca afirme ter usado uma skill que não
-foi carregada.
+Use apenas skills realmente instaladas.
 
 ## Modelos, esforço e subagentes
 
-A política normativa do ambiente Codex está em
-`docs/agents/MODEL_ROUTING.md`. Use os nomes exatos da interface:
-
-* modelos: `5.6 Sol`, `5.6 Terra`, `5.6 Luna`, `5.5`, `5.4` e `5.4 Mini`;
-* esforços: `Leve`, `Médio`, `Alto`, `Extra alto` e `Ultra`.
-
-Regra permanente: use o menor orquestrador, menor esforço e menores subagentes
-suficientes para entregar com segurança, evidência, validação e qualidade
-aceitável. Não use o modelo mais forte, esforço alto ou `Ultra` como padrão.
+A política normativa está em `docs/agents/MODEL_ROUTING.md`. Use os nomes exatos
+da interface e o menor orquestrador, esforço e subagentes suficientes para
+entregar com segurança, evidência e qualidade. Não use a capacidade máxima como
+padrão.
 
 ## GitHub como memória recuperável
 
-O GitHub é a fonte primária de continuidade. Ao final de qualquer rodada não
-trivial, o estado recuperável deve estar no repositório por commits, issues,
-ledgers, planos ou documentos de status.
+GitHub é a fonte primária de continuidade. Ao final de rodada não trivial, o
+estado recuperável deve estar em commits, issues, ledger, plano ou runway.
 
 Se houve progresso útil, faça commit e push em `main`, respeitando
-`docs/agents/AUTONOMY_AND_GIT.md`. Se a rodada não puder ser publicada, explique
-o bloqueio e registre a continuidade em issue, ledger ou documento de status.
-Não deixe a memória da tarefa depender apenas do chat.
+`docs/agents/AUTONOMY_AND_GIT.md`. Atualize issue, ledger e runway quando o estado
+da fila mudar. Não deixe memória necessária apenas no chat.
 
-`$handoff` é exceção: use somente quando a continuidade necessária ainda não
-estiver suficientemente persistida no repositório e não puder ser persistida
-antes do encerramento.
+`$handoff` é exceção: use somente quando algo essencial ainda não puder ser
+persistido no repo.
 
 ## Proteções críticas
 
-* Inspecione `git status` antes de editar quando houver ambiente local.
-* Não descarte nem sobrescreva alterações existentes do usuário.
-* Não amplie o escopo sem autorização.
-* Não reescreva a aplicação quando uma alteração incremental for viável.
-* Não exponha nem modifique segredos ou credenciais reais.
-* Para issues delimitadas, siga `docs/agents/AUTONOMY_AND_GIT.md` e conclua
-  autonomamente commits, push e atualizações remotas necessárias.
-* Fora desses limites, obtenha decisão explícita do usuário.
-* Execute testes e verificações relevantes antes de declarar o trabalho concluído.
-* Revise o diff final e informe verificações que não puderam ser executadas.
+- inspecione `git status` antes de editar quando houver ambiente local;
+- não descarte nem sobrescreva alterações existentes do usuário;
+- não amplie escopo sem autorização;
+- prefira mudança incremental a reescrita ampla;
+- não exponha nem modifique segredos ou credenciais;
+- execute testes/verificações proporcionais ao risco;
+- revise o diff final;
+- uma issue só fecha quando cada critério de aceite possui evidência explícita;
+- se auditoria posterior provar aceite incompleto, reabra a issue e corrija o ledger.
 
 ## Recomendação final obrigatória
 
-Ao concluir uma etapa ou recomendar continuidade, use o formato:
+Ao concluir uma etapa ou recomendar continuidade, use:
 
 `Próxima execução: orquestrador <Modelo>, esforço <Leve|Médio|Alto|Extra alto|Ultra>; fila <ready|blocked|empty>: <resumo>; subagentes <nenhum|lista modelo/esforço/função>; decisão humana <não|sim — motivo>; suficiência: <motivo curto>; limite: <restrição de contexto/tokens/escopo>; continuidade: <persistida|requer handoff> — <onde retomar>; git: <limpo|pendente> — <último commit/ação>.`
 
-Não recomende capacidade acima da necessária. Quando a tarefa seguinte for
-pequena, mecânica e diretamente validável, prefira `5.6 Luna` ou `5.4 Mini` com
-esforço `Leve`.
+Não recomende capacidade acima da necessária.
