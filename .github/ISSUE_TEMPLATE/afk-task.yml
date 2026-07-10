@@ -1,0 +1,96 @@
+name: AFK task
+description: Tarefa delimitada para execução autônoma por agente
+title: "AFK: "
+labels:
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use este formulário para uma unidade executável. Não misture gates, engines ou entregas independentes.
+  - type: input
+    id: parent
+    attributes:
+      label: Parent / epic
+      description: Número da epic ou issue-mãe.
+      placeholder: "#26"
+    validations:
+      required: true
+  - type: input
+    id: gate_task
+    attributes:
+      label: Gate e Task ID
+      placeholder: "Gate C / T5.2"
+    validations:
+      required: true
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objetivo
+      description: Resultado observável desta issue.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Escopo
+      description: Alterações autorizadas.
+    validations:
+      required: true
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Fora de escopo
+      description: Fronteiras que não podem ser atravessadas.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Critérios de aceite
+      description: Um checkbox verificável por linha.
+      placeholder: "- [ ] Critério → evidência esperada"
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependências
+      description: Issues predecessoras e decisões necessárias.
+      placeholder: "Blocked by #24"
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Plano de evidência
+      description: Testes, diffs, documentos ou comandos que provarão cada critério.
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: Testes mínimos
+      description: Comandos focais e suíte relevante.
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Riscos de regressão
+    validations:
+      required: true
+  - type: textarea
+    id: stop
+    attributes:
+      label: Critério de parada
+      description: Estado exato em que a issue termina.
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Orquestração inicial recomendada
+      placeholder: "Modelo / esforço / subagentes"
+    validations:
+      required: false
