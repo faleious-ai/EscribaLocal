@@ -1,0 +1,57 @@
+name: HITL decision
+description: Decisão humana necessária antes de uma frente prosseguir
+title: "HITL: "
+labels:
+  - ready-for-human
+body:
+  - type: textarea
+    id: decision
+    attributes:
+      label: Decisão necessária
+      description: Pergunta objetiva que precisa de resposta humana.
+    validations:
+      required: true
+  - type: textarea
+    id: why_human
+    attributes:
+      label: Por que não pode ser resolvida no repositório
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: Opções concretas
+      description: Liste opções mutuamente compreensíveis e suas consequências.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidências disponíveis
+    validations:
+      required: true
+  - type: textarea
+    id: recommendation
+    attributes:
+      label: Recomendação do agente
+    validations:
+      required: true
+  - type: textarea
+    id: consequences
+    attributes:
+      label: Consequência de cada opção
+    validations:
+      required: true
+  - type: textarea
+    id: parallel
+    attributes:
+      label: Trabalho que continua executável
+      description: Frentes independentes que não devem parar enquanto a decisão aguarda.
+    validations:
+      required: true
+  - type: textarea
+    id: stop
+    attributes:
+      label: Critério de fechamento
+    validations:
+      required: true
