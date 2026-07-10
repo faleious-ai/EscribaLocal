@@ -2,35 +2,82 @@
 
 Data: 2026-07-10
 
-Fonte de verdade de progresso para o subsistema TTS. Estados validos:
-`not_started`, `in_progress`, `implemented`, `verified`, `blocked`,
-`superseded`.
+Fonte de verdade do progresso auditável. Estado curto e próxima ação ficam em
+`docs/tts/CURRENT_RUNWAY.md`; contratos ficam na especificação e nas issues.
 
-## Gate A
+Estados válidos:
 
-| ID | Nome | Gate | Estado | Branch | PR | Commit | Evidencia | Testes | Pendencias | Dependencias | Proximo passo permitido |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| T0.1 | Congelar baseline auditavel | A | verified | `codex/tts-gate-a` | #15 draft | `b75ed41b` sobre base `b342721c` | `docs/tts/gate-a-baseline.md` registra commit-base, suite inicial e busca estatica inicial. | Baseline anterior: `python -m pytest` com `200 passed`. | Nenhuma. | Nenhuma. | Manter baseline como referencia historica; nao editar para reduzir criterio. |
-| T0.2 | Registrar escopo e precedencia | A | verified | `codex/tts-gate-a` | #15 draft | `b75ed41b` + diff local desta rodada | `CONTEXT.md` aponta escopo, ledger e relatorio do gate; escopo versionado em `docs/tts/`. | `python -m pytest` -> `217 passed`, `2 warnings`; `git diff --check` sem erro. | Nenhuma nesta rodada. | T0.1. | Revisao externa do Gate A; depois Gate B pode iniciar por T2.1. |
-| T1.1 | Remover presets Windows como vozes validas | A | verified | `codex/tts-gate-a` | #15 draft | `b75ed41b` + diff local desta rodada | `services/voice_profiles.py` nao expoe `is_preset`; adapters rejeitam IDs legados; `services/config_store.py` migra config/perfis; `static/js/voice_library.js` migra localStorage. | `tests/test_tts_legacy_voice_migration.py` -> `5 passed`; `tests/test_voice_profiles.py` -> `23 passed`; suite completa -> `217 passed`. | Nenhuma nesta rodada. | T0.2. | Revisar Gate A; nao iniciar criacao de primeira voz do Gate B ainda. |
-| T1.2 | Remover SAPI5/senoide/smoke funcional | A | verified | `codex/tts-gate-a` | #15 draft | `b75ed41b` + diff local desta rodada | Runtime 1.5B/Large/Realtime nao contem geradores SAPI5, senoide ou smoke sintetico; mensagens de erro rejeitam esses caminhos. | `tests/test_tts_forbidden_runtime_paths.py` -> `1 passed`; fora da raiz -> `1 passed`; busca funcional proibida sem ocorrencias. | Nenhuma nesta rodada. | T1.1. | Revisao externa do Gate A. |
-| T1.3 | Testes negativos contra regressao | A | verified | `codex/tts-gate-a` | #15 draft | `b75ed41b` + diff local desta rodada | Teste global usa raiz do arquivo; matriz de engine exige `engine_key` explicita e `fallback=false`. | `tests/test_tts_no_fallbacks.py` -> `13 passed`; `tests/test_tts_realtime_worker.py` -> `21 passed`; suite completa -> `217 passed`. | Nenhuma nesta rodada. | T1.1, T1.2. | Revisao externa; manter testes como barreira antes do Gate B. |
-| T9.3 | Corrigir Large para vozes reais | A | verified | `codex/tts-gate-a` | #15 draft | `b75ed41b` + diff local desta rodada | Large permanece indisponivel sem referencias reais por speaker; amostra artificial nao e caminho valido. | `tests/test_tts_large_clear_errors.py` -> `5 passed`; busca por `_build_voice_samples` sem ocorrencias. | Nenhuma nesta rodada. | T1.2. | Gate B nao altera Large; futura retomada fica em Gate D/F conforme escopo. |
-| T10.1 | Remover synthetic smoke do runtime Realtime | A | verified | `codex/tts-gate-a` | #15 draft | `b75ed41b` + diff local desta rodada | Cliente do worker rejeita sucesso sem `engine_key`; worker nao anuncia synthetic smoke como capacidade. | `tests/test_tts_realtime_worker.py` -> `21 passed`; suite completa -> `217 passed`; busca funcional proibida sem ocorrencias. | Nenhuma nesta rodada. | ADR `0001`. | Realtime nativo so pode avancar em T10.2, fora do Gate A. |
+- `not_started`;
+- `in_progress`;
+- `implemented` — código/artefato existe, mas aceite ainda não foi integralmente provado;
+- `verified` — todos os critérios possuem evidência explícita;
+- `blocked`;
+- `superseded`.
 
-## Gates Posteriores
+## Regra de verificação
 
-## Gate B
+Uma linha só recebe `verified` quando cada critério de aceite está mapeado para
+teste, diff, documento ou evidência. Suíte verde isolada não comprova critérios
+não exercitados. Auditoria posterior pode rebaixar o estado e reabrir a issue.
 
-| ID | Nome | Gate | Estado | Branch | PR | Commit | Evidencia | Testes | Pendencias | Dependencias | Proximo passo permitido |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| T2.1 | Versionar schema de voz | B | verified | `main` | n/a | publicado em `origin/main` | `services/voice_profiles.py` grava `schema_version=2`, migra `profile.json` legado, move artefatos para `original/`, `previews/` e `engines/`, preserva compatibilidade publica com `model_embeddings` e `is_default`, e prepara a estrutura persistente para `styles`, `events` e estados por engine sem implementa-los por completo. | `python -m pytest tests/test_voice_profiles.py -k versioned_schema -q` -> `1 passed`; `python -m pytest tests/test_voice_profiles.py -k legacy_profile_is_migrated_to_schema_v2 -q` -> `1 passed`; `python -m pytest tests/test_voice_profiles.py tests/test_tts_legacy_voice_migration.py tests/test_tts_no_fallbacks.py tests/test_tts_large_clear_errors.py tests/test_tts_realtime_worker.py -q` -> `69 passed`; `python -m pytest -q` -> `224 passed`, `4 warnings`. | Fora de escopo desta tarefa: entidade `Style`, entidade `Event`, captura real no wizard e orchestration posterior. | Gate A verificado. | T2.2 pode avancar desde que preserve a compatibilidade e a migracao idempotente do schema v2. |
-| T2.2 | Implementar entidade Style | B | verified | `main` | n/a | `03e28743` + `ff81eb75` publicados em `origin/main`; issue `#16` fechada | **Entregue:** `services/voice_profiles.py` persiste `style.json` em `styles/<style_id>/`, sincroniza resumos em `profile.json`, mantem `style_id` estavel com rename do nome visivel, persiste `aliases`, `instruction`, `parameters` e `engine_compatibility`, aceita referencia opcional normalizada por estilo, permite limpar a referencia e preserva a voz ao excluir um estilo. `routers/voice_routes.py` oferece listagem, criacao, edicao, duplicacao, exclusao, upload da referencia, leitura da referencia normalizada, leitura do audio original e remocao da referencia por HTTP. A duplicacao copia `reference.wav` e `original.wav`, preserva metadados, rejeita referencia pronta incompleta antes de criar a copia e remove a copia criada quando a primeira ou segunda escrita de midia falha; falha do proprio rollback e reportada explicitamente. | **Testado:** `python -m pytest tests/test_voice_profiles.py -k create_style_persists_in_profile_and_disk -q` -> `1 passed`; `python -m pytest tests/test_voice_profiles.py -k style_update_duplicate_reorder_and_delete -q` -> `1 passed`; `python -m pytest tests/test_voice_profiles.py -k style_http_crud -q` -> `1 passed`; `python -m pytest tests/test_voice_profiles.py -k "style_reference_persists_on_disk or style_reference_http_upload_and_fetch" -q` -> `2 passed`; `python -m pytest tests/test_voice_profiles.py -k style_instruction_and_parameters_roundtrip -q` -> `1 passed`; `python -m pytest tests/test_voice_profiles.py -k style_reference_http_delete_clears_media -q` -> `1 passed`; `python -m pytest tests/test_voice_profiles.py -k style_original_audio_http_fetch -q` -> `1 passed`; `python -m pytest tests/test_voice_profiles.py -k "duplicate_style_copies_reference_media or duplicate_style_rejects_missing_ready_reference_media or duplicate_style_rolls_back_when_media_copy_fails or duplicate_style_rolls_back_after_partial_media_copy" -q` -> `4 passed`, `33 deselected`; `python -m pytest -q` -> `236 passed`, `4 warnings`. | **Pendente:** nenhuma dentro de `T2.2`. **Fora de escopo:** preview por engine real, UI completa de estilos, entidade `Event` (`T2.3`), parser/AST, RenderPlan, AudioAssembler, timeline, wizard de captura real e capability matrix operacional por engine. | T2.1. | `T2.3` foi concluida pela issue `#17`; preservar o aceite ao triar `#18`/T3.1 e nao iniciar `T4.x`. |
-| T2.3 | Implementar entidade Event | B | verified | `main` | n/a | `c728eb87` publicado em `origin/main`; issue `#17` fechada como `completed` | **Entregue:** quatro IDs canonicos (`breath_short`, `breath_deep`, `sigh`, `laugh_soft`); importacao por upload ou gravacao; normalizacao para WAV mono 24 kHz sem exigir fala; metadados persistidos em `events.items` com caminho relativo e hash; listagem, escuta, substituicao e exclusao por HTTP; ausencia, ID/origem invalidos e silencio retornam erro explicito sem fallback; substituicao restaura a midia anterior se a persistencia do perfil falhar; exclusao preserva a voz e sua referencia. | **Testado:** ciclo RED confirmou WAV/metadados divergentes e silencio aceito; apos a correcao, `python -m pytest -q tests/test_voice_profiles.py -k "canonical_event or rolls_back_media or event_errors"` -> `6 passed`, `38 deselected`; `python -m pytest -q` -> `243 passed`, `4 warnings` conhecidas de `FastAPI.on_event`; revisoes de padroes e especificacao concluidas, com os achados de atomicidade e cobertura dos IDs corrigidos antes da publicacao. | **Pendente:** nenhuma dentro de `T2.3`. **Fora de escopo:** eventos customizados, geracao sintetica/fallback, parser/AST, RenderPlan, AudioAssembler, timeline e UI. | T2.2. | `#18`/T3.1 foi triada como `ready-for-agent`; pode iniciar pela captura real no wizard, sem iniciar `T3.2`, `T3.3` ou `T4.x`. |
-| T3.1 | Captura real da primeira voz no wizard | B | verified | `main` | n/a | commit desta rodada em `main`; issue `#18` | **Entregue:** o wizard grava pelo microfone ou recebe upload de áudio, exibe amostra para escuta, permite descartar/regravar, exige consentimento e cria a voz com o nome sugerido `Minha voz` (editável). A aprovação usa os endpoints existentes, define a voz criada como padrão e atualiza o status do setup. Chatterbox PT-BR passou a exigir voz padrão real, como VibeVoice. Falhas de microfone, upload, consentimento ou criação permanecem explícitas e não criam fallback. | `node --check static/js/setup_wizard.js`; `python -m pytest -q tests/test_setup_wizard.py tests/test_voice_profiles.py -k "first_voice_flow or setup"` -> `9 passed`, `44 deselected`, `4 warnings`; `python -m pytest -q` -> `248 passed`, `4 warnings` conhecidas de `FastAPI.on_event`. | **Pendente:** nenhuma dentro de `T3.1`. **Fora de escopo:** texto de captura/derivação por engine (`T3.2`/`T3.3`), perfil `.zip` (`T2.4`), Realtime, estilos, eventos, parser/AST, RenderPlan, timeline e multi-voz. | T2.3. | Parar esta rodada; formalizar a próxima issue antes de iniciar `T3.2` ou posterior. |
-| T3.2 | Aplicar texto de captura otimizado | B | verified | `main` | n/a | commit desta rodada em `main`; issue `#19` | **Entregue:** o passo de criação da primeira voz exibe o texto de captura em destaque, com orientação explícita de leitura durante a gravação e de que o texto não é enviado ao backend. O bloco permanece no passo enquanto o usuário grava, interrompe, descarta ou refaz a amostra. | `node --check static/js/setup_wizard.js`; `python -m pytest -q tests/test_setup_wizard.py` -> `8 passed`, `4 warnings`; `python -m pytest -q` -> `249 passed`, `4 warnings` conhecidas de `FastAPI.on_event`. | **Pendente:** nenhuma dentro de `T3.2`. **Fora de escopo:** derivação/análise de referência por engine (`T3.3`), perfil `.zip` (`T2.4`), Realtime, estilos, eventos, parser/AST, RenderPlan, timeline e multi-voz. | T3.1. | Formalizar `T3.3` antes de iniciar derivação de referência. |
-| T3.3 | Derivar referência canônica por engine | B | verified | `main` | n/a | commit desta rodada em `main`; issue `#20` | **Entregue:** a voz preserva o original e grava referência Chatterbox separada, limitada a 10 segundos úteis. Duração, silêncio removido e clipping ficam registrados; menos de 8 segundos úteis deixa estado explícito de falha sem criar áudio artificial. O endpoint permite ouvir a referência derivada. | `python -m pytest -q` -> `251 passed`, `4 warnings` conhecidas de `FastAPI.on_event`. | **Pendente:** nenhuma dentro de `T3.3`. **Fora de escopo:** estilos, parser/AST, RenderPlan, timeline, multi-voz, Realtime e perfil `.zip`. | T3.2. | Formalizar a próxima fatia antes de iniciar Gate C. |
-| T4.1 | Definir gramática formal | C | verified | `main` | n/a | commit desta rodada em `main`; issue `#21` | **Entregue:** EBNF canônica para estilos, parâmetros, falante, pausas, eventos e subtítulos; exemplos válidos/inválidos e fronteira explícita com a sintaxe provisória. | `git diff --check`; revisão documental. | **Pendente:** parser/AST pertence a T4.2. | T3.3. | Formalizar T4.2 antes de alterar o parser. |
-| T4.2 | Implementar parser e AST | C | verified | `main` | n/a | commit desta rodada em `main`; issue `#22` | **Entregue:** AST mínimo para estilos, parâmetros, pausas, eventos e subtítulos; erros de fechamento e duração incluem linha/coluna; a forma canônica é reduzida a texto falado antes da engine. | `python -m pytest -q tests/test_tts_orchestration.py` -> `11 passed`; `python -m pytest -q` -> `257 passed`, `4 warnings` conhecidas de `FastAPI.on_event`. | **Pendente:** validação contra biblioteca e capability matrix pertence a T4.3. | T4.1. | Formalizar T4.3 antes de resolver estilos/falantes/eventos contra dados reais. |
-| T4.3 | Validar roteiro contra biblioteca | C | verified | `main` | n/a | commit desta rodada em `main`; issue `#23` | **Entregue:** validação pura do AST resolve estilos e aliases, exige speaker mapeado, exige eventos disponíveis e rejeita compatibilidade bloqueada por engine, sem gerar áudio. | `python -m pytest -q` -> `259 passed`, `4 warnings` conhecidas de `FastAPI.on_event`. | **Pendente:** RenderPlan pertence a T5.1. | T4.2. | Formalizar T5.1 antes de criar timeline de jobs. |
-| T5.1 | Criar RenderPlan persistível | C | verified | `main` | n/a | commit desta rodada em `main`; issue `#24` | **Entregue:** jobs ordenados e determinísticos preservam voz, estilo, referência, parâmetros e textos original/normalizado; manifesto é serializável e não gera áudio. | `python -m pytest -q` -> `260 passed`, `4 warnings` conhecidas de `FastAPI.on_event`. | **Pendente:** falantes reais/virtuais pertence a T5.2. | T4.3. | Formalizar T5.2 antes de resolver falantes no RenderPlan. |
+## Gate A — confiança e remoção de fallbacks
+
+| ID | Tarefa | Estado | Evidência principal | Observação |
+| --- | --- | --- | --- | --- |
+| T0.1 | Baseline auditável | verified | `docs/tts/gate-a-baseline.md` | Referência histórica preservada. |
+| T0.2 | Escopo e precedência | verified | `CONTEXT.md`, escopo em `docs/tts/` | Fontes canônicas roteadas. |
+| T1.1 | Remover presets Windows | verified | testes de migração/vozes | Sem presets como produção. |
+| T1.2 | Remover SAPI5/senoide/smoke | verified | testes de caminhos proibidos | Falha explícita preservada. |
+| T1.3 | Testes negativos | verified | testes de no-fallback | Barreira de regressão. |
+| T9.3 | Large sem referência artificial | verified | testes de erro claro | Validação real futura. |
+| T10.1 | Realtime sem smoke sintético | verified | testes do worker | Realtime nativo segue separado. |
+
+## Gate B — voz real, estilos, eventos e primeira voz
+
+| ID | Issue | Tarefa | Estado | Evidência resumida |
+| --- | --- | --- | --- | --- |
+| T2.1 | — | Schema de voz v2 | verified | migração idempotente e derivados por engine; suíte registrada no histórico. |
+| T2.2 | #16 | Entidade Style | verified | CRUD, aliases, parâmetros, compatibilidade, referência opcional e rollback. |
+| T2.3 | #17 | Entidade Event | verified | eventos canônicos, mídia, metadados, erros e rollback. |
+| T3.1 | #18 | Captura real no wizard | verified | gravação/upload, consentimento, escuta e voz padrão. |
+| T3.2 | #19 | Texto de captura | verified | orientação e permanência no fluxo de gravação. |
+| T3.3 | #20 | Referência por engine | verified | original preservado, referência Chatterbox e diagnóstico de qualidade. |
+
+## Gate C — linguagem, validação e RenderPlan
+
+Epic operacional: #26
+Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
+
+| ID | Issue | Tarefa | Estado | Entregue | Lacuna / próximo passo | Dependência |
+| --- | --- | --- | --- | --- | --- | --- |
+| T4.1 | #21 | Gramática formal | verified | EBNF, exemplos e fronteiras. | Nenhuma nesta tarefa. | T3.3 |
+| T4.2 | #22 | Parser e AST | verified | nós de estilo, pausa, evento, subtítulo e erros com posição. | Nenhuma nesta tarefa. | T4.1 |
+| T4.3 | #23 | Validação contra biblioteca | verified | validação pura de estilo, alias, speaker, evento e compatibilidade. | Sem RenderPlan por contrato. | T4.2 |
+| T5.1 | #24 | RenderPlan persistível | implemented | jobs ordenados, serialização, voz, estilo, referência, parâmetros e textos. | **Aceite incompleto:** seções não são preservadas; ID não cobre toda a semântica; falta mapa aceite→evidência. Reabrir e concluir. | T4.3 |
+| T5.2 | #25 | Falantes reais e virtuais | blocked | issue existente e contrato aprofundado. | Aguardar #24; depois resolver por segmento `speaker → voice → style → reference → parameters`. | T5.1 |
+
+## Bloqueios independentes
+
+| Issue | Tipo | Estado | Impacto |
+| --- | --- | --- | --- |
+| #8 | HITL — Realtime 0.5B | blocked | Bloqueia somente a frente nativa do Realtime, não Gate C. |
+| #12 | Validação final | blocked | Depende de gates posteriores e de evidência real em hardware. |
+
+## Reconciliação de T5.1
+
+A issue #24 foi fechada com registro de `260 passed`, mas o critério explícito de
+preservação de seções não possui implementação/evidência no manifesto atual. O
+estado foi rebaixado de `verified` para `implemented`; o trabalho entregue não é
+apagado, mas a issue precisa ser reaberta antes de #25.
+
+## Próximo passo permitido
+
+1. reabrir #24;
+2. concluir exclusivamente T5.1 conforme `RENDERPLAN_CONTRACT.md`;
+3. registrar aceite → evidência;
+4. fechar #24 somente após testes;
+5. retriar #25 como `ready-for-agent`;
+6. atualizar este ledger e `CURRENT_RUNWAY.md`.
+
+Não iniciar código de #25, engines, UI, AudioAssembler, montagem ou Realtime antes
+dessa sequência.
