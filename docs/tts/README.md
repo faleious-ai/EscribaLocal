@@ -17,7 +17,8 @@ Este diretório concentra a especificação, o estado operacional e as evidênci
 
 - issue ativa no GitHub;
 - `docs/tts/ISSUE_EXECUTION_PLAN.md` quando houver fila, dependências ou múltiplas frentes;
-- `docs/tts/EXECUTION_STATUS.md` quando for necessário consultar evidências ou histórico detalhado.
+- `docs/tts/EXECUTION_STATUS.md` quando for necessário consultar evidências ou histórico detalhado;
+- `docs/tts/GITHUB_PROJECT_SETUP.md` apenas quando for configurar Project, milestone, sub-issues ou dependências nativas.
 
 ## Carregar para evidência histórica
 
