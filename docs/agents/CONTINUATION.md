@@ -125,17 +125,16 @@ atualize os arquivos de continuidade aplicáveis ou gere `$handoff`.
 
 No estado registrado em 2026-07-10:
 
-* `#16` está concluída;
-* `#17` está concluída;
-* `#18` é a próxima execução formal (`T3.1 — captura real da primeira voz no
-  wizard`) e está classificada como `Ready`;
+* `#16`, `#17`, `#18` e `#19` estão concluídas;
+* a próxima frente do Gate B é `T3.3` (derivação de referência por engine),
+  que ainda precisa de issue delimitada;
 * `#8` está classificada como `Blocked-human` para Realtime nativo;
 * `#12` está bloqueada por lacunas posteriores e não é a próxima execução
   operacional;
-* `T4.x` está fora de escopo até concluir `#18` e formalizar a ordem posterior;
+* `T4.x` está fora de escopo até concluir `T3.3` e formalizar a ordem posterior;
 * a continuidade principal está em `docs/tts/EXECUTION_STATUS.md`,
-  `docs/tts/ISSUE_EXECUTION_PLAN.md` e issue `#18`.
+  `docs/tts/ISSUE_EXECUTION_PLAN.md` e nas issues `#18`/`#19` concluídas.
 
-O orquestrador pode iniciar e concluir `#18` autonomamente se a issue continuar
-delimitada e os testes forem proporcionais. Quando esse estado mudar, atualize o
-ledger/status e a issue correspondente, não apenas este resumo.
+Não iniciar `T3.3` sem formalizar a issue e resolver as decisões técnicas
+necessárias. Quando esse estado mudar, atualize o ledger/status e a issue
+correspondente, não apenas este resumo.

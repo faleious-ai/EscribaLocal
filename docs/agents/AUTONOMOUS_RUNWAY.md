@@ -77,11 +77,11 @@ um documento foi atualizado.
 
 No estado registrado em 2026-07-10:
 
-* `#18` / `T3.1` é `Ready`;
+* `#18` / `T3.1` e `#19` / `T3.2` estão concluídas;
+* `T3.3` é a próxima frente, mas permanece `Blocked-human` até haver uma
+  decisão sobre os critérios de derivação e qualidade por engine;
 * `#8` é `Blocked-human` para Realtime nativo;
 * `#12` está bloqueada por lacunas posteriores e não é próxima execução;
-* `T4.x` é `Out-of-scope` até concluir `#18` e formalizar a ordem posterior;
-* o orquestrador pode iniciar e concluir `#18` autonomamente se a issue continuar
-  delimitada e os testes forem proporcionais.
+* `T4.x` é `Out-of-scope` até concluir `T3.3` e formalizar a ordem posterior.
 
 Quando esse estado mudar, atualize os documentos de TTS e a issue correspondente.
