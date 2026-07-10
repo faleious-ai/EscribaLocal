@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: TTS current runway
+    url: https://github.com/faleious-ai/EscribaLocal/blob/main/docs/tts/CURRENT_RUNWAY.md
+    about: Consulte a fila e a próxima execução antes de abrir nova issue.
+  - name: TTS documentation map
+    url: https://github.com/faleious-ai/EscribaLocal/blob/main/docs/tts/README.md
+    about: Veja quais documentos carregar e quais são históricos.
