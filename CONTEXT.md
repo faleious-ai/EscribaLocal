@@ -1,36 +1,49 @@
 # Contexto do EscribaLocal
 
-Este repositorio e de contexto unico. Antes de planejar ou alterar comportamento nao trivial, leia os documentos de dominio e ADRs relevantes.
+Este repositório é de contexto único. Antes de planejar ou alterar comportamento
+não trivial, leia os documentos de domínio e ADRs relevantes.
 
 ## Fonte de verdade atual para TTS
 
 O subsistema TTS deve seguir, nesta ordem:
 
-1. decisoes explicitas mais recentes do usuario;
+1. decisões explícitas mais recentes do usuário;
 2. `docs/tts/ESCOPO_DECISOES_PLANO_TTS_ESCRIBALOCAL.md`;
-3. `docs/tts/EXECUTION_STATUS.md`;
-4. `docs/tts/gate-a-report.md` ou o relatorio do gate atual;
-5. ADRs aceitos que nao contradigam esse escopo;
-6. instrucoes operacionais em `AGENTS.md` e `docs/agents/`.
+3. contratos canônicos específicos, como `docs/tts/RENDERPLAN_CONTRACT.md`;
+4. issue ativa delimitada;
+5. `docs/tts/CURRENT_RUNWAY.md`;
+6. `docs/tts/EXECUTION_STATUS.md`;
+7. relatório do gate aplicável;
+8. ADRs aceitos que não contradigam esse escopo;
+9. instruções operacionais em `AGENTS.md` e `docs/agents/`.
 
-Leia esses tres documentos de TTS em conjunto antes de planejar ou alterar o
-subsistema: o escopo define decisoes e sequencia, o ledger registra o estado
-auditavel das tarefas, e o relatorio do gate mostra o que foi validado,
-bloqueado ou movido para o proximo gate.
+Para retomada, leia primeiro `docs/tts/CURRENT_RUNWAY.md`. Para mapa de carga sob
+demanda, leia `docs/tts/README.md`. A especificação define decisões; a issue ativa
+define a unidade executável; o ledger registra evidências; o runway é o cursor
+curto. Nenhum desses papéis deve ser duplicado em documentos genéricos de agentes.
 
-## Documentos historicos de TTS
+## Documentos históricos de TTS
 
-`PROMPT_MESTRE_TTS_ESCRIBALOCAL.md` e a PRD historica sobre "TTS local verificavel com VibeVoice e Chatterbox PT-BR" devem ser tratados como registro historico. Eles nao limitam o escopo atual quando divergirem de `docs/tts/ESCOPO_DECISOES_PLANO_TTS_ESCRIBALOCAL.md`.
+`PROMPT_MESTRE_TTS_ESCRIBALOCAL.md`, a PRD histórica sobre “TTS local verificável
+com VibeVoice e Chatterbox PT-BR”, drafts de issue e propostas antigas de tracker
+são registros de origem. Eles não limitam o escopo atual quando divergirem das
+fontes canônicas acima.
 
-Conflitos ja resolvidos pelo escopo atual:
+Conflitos já resolvidos pelo escopo atual:
 
-- estilos personalizados pertencem a voz e nao sao apenas presets globais;
-- tags usam diretamente o nome do estilo, nao a sintaxe provisoria `[style:...]`;
-- subtitulos Markdown sao metadados nao falados;
-- falantes virtuais e multiplas vozes usam orquestracao por segmentos;
-- SAPI5, vozes Windows, senoide e smoke sintetico nao sao caminhos de producao validos;
-- a PRD antiga nao inclui todo o escopo de estilos, eventos, subtitulos, montagem por timeline e RenderPlan.
+- estilos personalizados pertencem à voz e não são apenas presets globais;
+- tags usam diretamente o nome/alias do estilo, não a sintaxe provisória `[style:...]`;
+- subtítulos Markdown são metadados não falados;
+- falantes virtuais e múltiplas vozes usam orquestração por segmentos;
+- SAPI5, vozes Windows, senoide e smoke sintético não são produção válida;
+- a PRD antiga não inclui todo o escopo de estilos, eventos, subtítulos, montagem por timeline e RenderPlan.
 
 ## ADRs relevantes
 
 - `docs/adr/0001-isolar-vibevoice-realtime-por-subprocesso.md`
+
+## Regra de correção de deriva
+
+Se runway, ledger, issue e código divergirem, não escolha silenciosamente o texto
+mais conveniente. Audite a evidência, corrija o estado incorreto e registre a
+reconciliação no GitHub antes de continuar.
