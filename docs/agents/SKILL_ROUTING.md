@@ -83,6 +83,11 @@ Mudança arquitetural:
 
 `$improve-codebase-architecture → $to-prd quando necessário → $to-issues → $tdd → $review`
 
-Não execute automaticamente todo o fluxo de uma vez. Use somente a etapa
-apropriada ao estado atual e avance quando a saída necessária da etapa anterior
-existir.
+Não execute automaticamente todo o fluxo pulando artefatos obrigatórios,
+critérios de aceite ou validações proporcionais. Porém, quando a saída de uma
+etapa existir, a próxima etapa estiver delimitada, autorizada e desbloqueada, o
+orquestrador deve continuar sem pedir nova autorização. A parada deve ocorrer por
+bloqueio real, não por término de microetapa.
+
+Consulte `docs/agents/AUTONOMOUS_RUNWAY.md` quando houver fila de tarefas,
+backlog, múltiplas frentes ou bloqueios parciais.
