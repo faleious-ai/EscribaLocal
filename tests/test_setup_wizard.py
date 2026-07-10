@@ -95,6 +95,15 @@ def test_setup_wizard_embeds_real_voice_capture_controls():
     assert "Falha ao criar a voz" in source
     assert "wizard-open-voices" not in source
 
+
+def test_setup_wizard_shows_capture_text_without_submitting_it():
+    source = Path("static/js/setup_wizard.js").read_text(encoding="utf-8")
+
+    assert "Hoje, João trouxe café quente, pão de queijo, milho e chá." in source
+    assert "leia este texto em voz alta durante a gravação" in source.lower()
+    assert 'formData.append("text"' not in source
+
+
 def test_setup_complete_endpoint(client):
     settings = config_store.get_settings()
     settings.first_run_completed = False

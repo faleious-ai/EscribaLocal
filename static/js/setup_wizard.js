@@ -107,6 +107,10 @@
             content = `
                 <h2>Criar sua voz</h2>
                 <p>Grave ou envie uma amostra autorizada para criar sua primeira voz sem sair do assistente.</p>
+                <div role="note" style="background:rgba(255,255,255,0.03); border-left:3px solid var(--accent-cyan); padding:12px 15px; margin:15px 0; border-radius:4px;">
+                    <p style="margin:0 0 6px 0; font-size:13px;"><b>Texto de captura:</b> leia este texto em voz alta durante a gravação. Ele serve apenas como guia e não é enviado ao backend.</p>
+                    <p style="margin:0; font-size:14px; line-height:1.6; font-style:italic;">Hoje, João trouxe café quente, pão de queijo, milho e chá. Bia perguntou: amanhã você fala devagar, com clareza, firmeza e emoção?</p>
+                </div>
                 <div style="background:rgba(0,242,254,0.05); border:1px solid rgba(0,242,254,0.2); padding:15px; border-radius:8px; margin:15px 0;">
                     <p style="margin:0 0 8px 0; font-size:13px;"><b>Status do TTS:</b> ${ttsReady ? "pronto" : "pendente: crie ou importe uma voz real"}</p>
                     <ul style="margin:0; padding-left:20px; font-size:12.5px; line-height:1.5;">
