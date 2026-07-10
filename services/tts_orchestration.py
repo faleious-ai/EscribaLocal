@@ -29,6 +29,81 @@ class TtsPlan:
     tags: List[Dict[str, str]]
 
 
+@dataclass
+class ScriptNode:
+    kind: str
+    text: str = ""
+    parameters: Dict[str, str] = field(default_factory=dict)
+    children: List["ScriptNode"] = field(default_factory=list)
+    line: int = 1
+    column: int = 1
+
+
+@dataclass
+class ScriptAst:
+    nodes: List[ScriptNode]
+
+
+_canonical_tag_pattern = re.compile(r"^\[([a-zA-Z_][\w-]*)(.*?)\]$")
+_canonical_close_pattern = re.compile(r"^\[/([a-zA-Z_][\w-]*)\]$")
+
+
+def parse_script(script: str) -> ScriptAst:
+    """Parseia a gramática canônica de T4.1 sem resolver a biblioteca."""
+    root: List[ScriptNode] = []
+    stack: List[ScriptNode] = []
+
+    def append(node: ScriptNode) -> None:
+        (stack[-1].children if stack else root).append(node)
+
+    for line_no, raw in enumerate(script.replace("\r\n", "\n").split("\n"), 1):
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("##"):
+            append(ScriptNode("subtitle", text=line[2:].strip(), line=line_no))
+            continue
+        closing = _canonical_close_pattern.match(line)
+        if closing:
+            if not stack or stack[-1].text != closing.group(1):
+                raise TtsOrchestrationError(f"Fechamento de estilo inválido na linha {line_no}, coluna 1.")
+            stack.pop()
+            continue
+        match = _canonical_tag_pattern.match(line)
+        if match:
+            name, tail = match.group(1), match.group(2).strip()
+            if name == "pausa":
+                if not re.fullmatch(r"\d+(?:\.\d+)?(?:ms|s)", tail):
+                    raise TtsOrchestrationError(f"Duração de pausa inválida na linha {line_no}, coluna 1.")
+                append(ScriptNode("pause", text=tail, line=line_no))
+                continue
+            if name in {"respiracao", "suspiro", "risada"}:
+                append(ScriptNode("event", text=name, parameters={"modificador": tail} if tail else {}, line=line_no))
+                continue
+            params = dict(re.findall(r"([\w-]+)=([^\s]+)", tail))
+            node = ScriptNode("style", text=name, parameters=params, line=line_no)
+            append(node)
+            stack.append(node)
+            continue
+        append(ScriptNode("text", text=line, line=line_no))
+    if stack:
+        node = stack[-1]
+        raise TtsOrchestrationError(f"Estilo '{node.text}' sem fechamento na linha {node.line}, coluna 1.")
+    return ScriptAst(root)
+
+
+def _canonical_spoken_text(script: str) -> str:
+    def collect(nodes: List[ScriptNode]) -> List[str]:
+        spoken: List[str] = []
+        for node in nodes:
+            if node.kind == "text":
+                spoken.append(node.text)
+            elif node.kind == "style":
+                spoken.extend(collect(node.children))
+        return spoken
+    return " ".join(collect(parse_script(script).nodes))
+
+
 _speaker_line_pattern = re.compile(r"^(?:voz|voice|speaker)\s*([0-9]+)\s*:\s*(.*)$", re.IGNORECASE)
 _tag_pattern = re.compile(r"\[([a-zA-Z_][\w-]*)(?::([^\]]+))?\]")
 _valid_tags = {"style", "pause"}
@@ -227,6 +302,11 @@ def orchestrate_tts(
 ) -> TtsPlan:
     if not text or not text.strip():
         raise TtsOrchestrationError("Informe um texto para gerar voz.")
+
+    # A forma canônica possui fechamento explícito; reduza-a para texto falado
+    # antes do pipeline legado, preservando a garantia de não vazar tags.
+    if "[/" in text:
+        text = _canonical_spoken_text(text)
 
     all_tags: List[Dict[str, str]] = []
     segments: List[TtsSegment] = []

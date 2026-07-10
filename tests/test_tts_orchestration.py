@@ -1,6 +1,23 @@
 import pytest
 
-from services.tts_orchestration import TtsOrchestrationError, orchestrate_tts
+from services.tts_orchestration import TtsOrchestrationError, orchestrate_tts, parse_script
+
+
+def test_parser_builds_ast_for_style_pause_event_and_subtitle():
+    ast = parse_script(
+        "## Abertura\n[calmo falante=ana intensidade=0.7]\nOlá.\n[/calmo]\n[pausa 400ms]\n[respiracao profunda]"
+    )
+
+    assert [node.kind for node in ast.nodes] == ["subtitle", "style", "pause", "event"]
+    assert ast.nodes[1].parameters == {"falante": "ana", "intensidade": "0.7"}
+    assert ast.nodes[1].children[0].text == "Olá."
+
+
+def test_canonical_tags_do_not_reach_engine_script():
+    plan = orchestrate_tts("[calmo falante=ana]\nOlá.\n[/calmo]\n[pausa 400ms]")
+
+    assert plan.engine_script == "Olá."
+    assert "[" not in plan.engine_script
 
 
 def test_orchestration_normalizes_pt_br_and_strips_valid_tags():
