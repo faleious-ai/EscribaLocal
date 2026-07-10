@@ -197,29 +197,31 @@ Tratamento recomendado:
 
 - não abrir issue separada para cada uma;
 - registrar tudo como checklist de evidências dentro da issue `#16`;
-- atualizar o ledger distinguindo o código publicado em `03e28743` da validação
-  adicional ainda local.
+- manter o ledger alinhado aos commits `03e28743`/`ff81eb75` e ao fechamento da
+  issue `#16`.
 
-## Próxima issue única em execução
+## T2.2 encerrada e próxima issue para triagem
 
-Continuar exclusivamente na issue AFK dedicada a `T2.2`:
+Issue concluída:
 
-**Issue:** `#16` `AFK: Formalizar e concluir T2.2 da entidade Style`
+- `#16` `AFK: Formalizar e concluir T2.2 da entidade Style` — fechada como
+  `completed` após sincronização de aceite, testes e evidências.
 
-**Motivo:** o aceite de backend foi publicado em `03e28743` e está testado;
-falta publicar a validação adicional somente após autorização e sincronizar as
-evidências da issue `#16`, antes de pular para `T2.3` ou parser/orchestration.
+Próxima candidata única:
 
-Atualização do tracker em 2026-07-07:
+- `#17` `AFK: Implementar T2.3 da entidade Event` — permanece `needs-triage` e
+  deve ser avaliada antes de qualquer implementação.
 
-- `#16` `AFK: Formalizar e concluir T2.2 da entidade Style`
-- `#17` `AFK: Implementar T2.3 da entidade Event`
+Atualização do tracker em 2026-07-09:
+
+- `#16` fechada como `completed`
+- `#17` aberta como `needs-triage`
 - `#18` `AFK: Implementar T3.1 de captura real da primeira voz no wizard`
 
 ## Ordem operacional recomendada
 
-1. `T2.2 — Formalizar e concluir entidade Style`
-2. `T2.3 — Implementar entidade Event`
+1. `T2.2 — Formalizar e concluir entidade Style` — concluída
+2. `T2.3 — Implementar entidade Event` — próxima, após triagem de `#17`
 3. `T3.1 — Captura real da primeira voz no wizard`
 4. proposta de divisão `T4.x / T5.x / T6.x / T7.x`
 
@@ -232,9 +234,9 @@ Regra de governança:
 
 ## Ações recomendadas no tracker
 
-### Fechar
+### Fechadas
 
-- nenhuma issue aberta deve ser fechada nesta rodada
+- `#16` — aceite e evidências consolidados; fechada como `completed`
 
 ### Dividir
 
@@ -300,7 +302,9 @@ Formalizar e concluir a entidade `Style` dentro de cada voz, consolidando o que 
 None - can start immediately
 ```
 
-## Texto proposto para atualização da issue `#16` (não publicado)
+## Texto publicado na issue `#16`
+
+Comentário: https://github.com/faleious-ai/EscribaLocal/issues/16#issuecomment-4930885411
 
 ```text
 T2.2 está implementado em `main` pelo commit `03e28743`.
@@ -318,5 +322,5 @@ Validação local posterior ao commit: `python -m pytest -q` -> `236 passed`, `4
 
 Fora de T2.2/#16: preview por engine real, UI completa de estilos, Event, parser/AST, RenderPlan, AudioAssembler, timeline, wizard e capability matrix operacional.
 
-Pendente antes do fechamento: publicar a validação adicional mediante autorização, sincronizar checklist/evidências desta issue e então atualizar o ledger para `verified`.
+Concluído: validação publicada em `ff81eb75`, checklist/evidências sincronizados e issue fechada como `completed`.
 ```
