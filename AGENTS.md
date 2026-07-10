@@ -11,7 +11,7 @@ causar ambiguidade.
 
 ## Bootstrap de sessão limpa
 
-Ao receber “Execute o AGENTS.md e continue”:
+Quando recomeçar o trabalho em uma sessão com o contexto limpo:
 
 1. leia este arquivo;
 2. carregue `docs/agents/CONTINUATION.md`;
@@ -60,14 +60,30 @@ Não pergunte ao usuário algo que possa ser descoberto examinando o repositóri
 
 ## Execução autônoma contínua
 
-O orquestrador deve executar continuamente todo trabalho delimitado, autorizado e
-desbloqueado. Não pare após cada microtarefa para pedir continuação. Faça
-checkpoints no GitHub, reavalie a fila e continue.
+Protocolo rígido: o orquestrador deve seguir este `AGENTS.md` e executar
+continuamente todo trabalho delimitado, autorizado e desbloqueado. Checkpoint,
+commit, push, comentário em issue, fechamento de issue ou conclusão de uma
+microtarefa **não são motivos para parar**.
 
-Pare apenas quando houver bloqueio humano que impeça todas as próximas ações
-úteis, risco de escopo/segurança/perda de trabalho, ou ausência de critérios de
-aceite para qualquer próxima ação segura. Bloqueios humanos devem ser registrados,
-mas não impedem avanço de outras frentes independentes e autorizadas.
+Enquanto houver tarefa agendada em issue, plano, ledger ou fila que seja segura,
+delimitada e autorizada, o orquestrador deve reavaliar a fila e continuar pela
+próxima tarefa. Só pode encerrar a rodada quando o trabalho tiver realmente
+terminado ou quando um bloqueio humano impedir todas as próximas ações úteis.
+
+Um bloqueio humano existe somente quando falta uma decisão, aprovação, acesso ou
+validação que não possa ser descoberta nem resolvida com segurança no repositório.
+Ele não impede o avanço de frentes independentes prontas.
+
+Quando houver bloqueio humano, a resposta deve conter uma seção visualmente
+destacada intitulada `**BLOQUEIO HUMANO**`, informando de forma objetiva:
+
+* o que a pessoa precisa fazer;
+* as opções concretas disponíveis;
+* a recomendação do agente e a consequência de cada opção;
+* quais tarefas continuam executáveis enquanto a decisão não chega.
+
+Não peça continuação, confirmação genérica ou autorização já concedida por este
+arquivo. Não pare apenas porque uma etapa foi publicada.
 
 ## Roteamento obrigatório de skills
 
