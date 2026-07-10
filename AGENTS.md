@@ -15,17 +15,19 @@ Ao receber “Execute o AGENTS.md e continue”:
 
 1. leia este arquivo;
 2. carregue `docs/agents/CONTINUATION.md`;
-3. inspecione `git status --short --branch` quando houver ambiente local
+3. carregue `docs/agents/AUTONOMOUS_RUNWAY.md` quando houver fila, backlog,
+   múltiplas frentes ou continuidade autônoma;
+4. inspecione `git status --short --branch` quando houver ambiente local
    disponível;
-4. identifique a tarefa ativa por issues, planos, ledgers, documentos de status e
+5. identifique a tarefa ativa por issues, planos, ledgers, documentos de status e
    arquivos modificados;
-5. leia apenas os documentos de continuidade diretamente aplicáveis;
-6. reconstrua objetivo, escopo, fora de escopo, critérios de aceite, testes
-   mínimos, próxima ação e critério de parada;
-7. continue autonomamente quando houver uma única issue delimitada
-   `ready-for-agent` e nenhuma decisão humana pendente;
-8. peça decisão objetiva ao usuário se houver ambiguidade real sobre qual tarefa
-   continuar ou se houver decisão humana pendente.
+6. leia apenas os documentos de continuidade diretamente aplicáveis;
+7. reconstrua objetivo, escopo, fora de escopo, critérios de aceite, testes
+   mínimos, próxima ação, fila de trabalho e critério de parada;
+8. continue autonomamente quando houver trabalho delimitado, autorizado e
+   desbloqueado;
+9. peça decisão objetiva ao usuário somente se houver bloqueio humano real que
+   impeça todas as próximas ações úteis ou se continuar criaria risco material.
 
 Não carregue o repositório inteiro por padrão. Comece por mapa, busca dirigida e
 leitura sob demanda.
@@ -35,6 +37,7 @@ leitura sob demanda.
 | Situação | Carregar |
 | --- | --- |
 | Sessão limpa, “continue”, fim de rodada ou risco de perda de contexto | `docs/agents/CONTINUATION.md` |
+| Fila de tarefas, backlog, múltiplas frentes, bloqueios ou execução contínua | `docs/agents/AUTONOMOUS_RUNWAY.md` |
 | Issue, commit, push, branch, autonomia ou ação remota no GitHub | `docs/agents/AUTONOMY_AND_GIT.md`, `docs/agents/issue-tracker.md`, `docs/agents/triage-labels.md` |
 | Tarefa não trivial ou escolha de skill | `docs/agents/SKILL_ROUTING.md` |
 | Escolha de modelo, esforço, orquestrador ou subagentes | `docs/agents/MODEL_ROUTING.md` |
@@ -54,6 +57,17 @@ trate PRDs e prompts históricos como escopo ativo quando divergirem do escopo
 consolidado atual.
 
 Não pergunte ao usuário algo que possa ser descoberto examinando o repositório.
+
+## Execução autônoma contínua
+
+O orquestrador deve executar continuamente todo trabalho delimitado, autorizado e
+desbloqueado. Não pare após cada microtarefa para pedir continuação. Faça
+checkpoints no GitHub, reavalie a fila e continue.
+
+Pare apenas quando houver bloqueio humano que impeça todas as próximas ações
+úteis, risco de escopo/segurança/perda de trabalho, ou ausência de critérios de
+aceite para qualquer próxima ação segura. Bloqueios humanos devem ser registrados,
+mas não impedem avanço de outras frentes independentes e autorizadas.
 
 ## Roteamento obrigatório de skills
 
@@ -114,9 +128,9 @@ antes do encerramento.
 
 ## Recomendação final obrigatória
 
-Ao concluir uma etapa ou recomendar a próxima rodada, use o formato:
+Ao concluir uma etapa ou recomendar continuidade, use o formato:
 
-`Próxima rodada recomendada: orquestrador <Modelo>, esforço <Leve|Médio|Alto|Extra alto|Ultra>; subagentes <nenhum|lista modelo/esforço/função>; suficiência: <motivo curto>; limite: <restrição de contexto/tokens/escopo>; continuidade: <persistida|requer handoff> — <onde retomar>; git: <limpo|pendente> — <último commit/ação>.`
+`Próxima execução: orquestrador <Modelo>, esforço <Leve|Médio|Alto|Extra alto|Ultra>; fila <ready|blocked|empty>: <resumo>; subagentes <nenhum|lista modelo/esforço/função>; decisão humana <não|sim — motivo>; suficiência: <motivo curto>; limite: <restrição de contexto/tokens/escopo>; continuidade: <persistida|requer handoff> — <onde retomar>; git: <limpo|pendente> — <último commit/ação>.`
 
 Não recomende capacidade acima da necessária. Quando a tarefa seguinte for
 pequena, mecânica e diretamente validável, prefira `5.6 Luna` ou `5.4 Mini` com
