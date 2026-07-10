@@ -31,6 +31,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 VOICES_DIR = PROJECT_ROOT / "data" / "voices"
 
 SAMPLE_RATE = 24000
+CHATTERBOX_REFERENCE_MAX_SECONDS = 10.0
+CHATTERBOX_REFERENCE_MIN_SECONDS = 8.0
 VOICE_SCHEMA_VERSION = 2
 ALLOWED_EXTENSIONS = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".webm", ".opus", ".aac"}
 MAX_UPLOAD_BYTES = 60 * 1024 * 1024
@@ -104,6 +106,10 @@ def _profile_path(voice_id: str) -> Path:
 
 def reference_path(voice_id: str) -> Path:
     return _voice_dir(voice_id) / "reference.wav"
+
+
+def chatterbox_reference_path(voice_id: str) -> Path:
+    return _engine_dir(voice_id, "chatterbox_pt_br") / "reference.wav"
 
 
 def preview_path(voice_id: str) -> Path:
@@ -387,13 +393,11 @@ def _ensure_profile_schema(profile: Dict[str, Any]) -> bool:
         engines["vibevoice_1_5b"] = vibe_state
         changed = True
 
-    chatterbox_state = engines.get("chatterbox_pt_br")
-    expected_chatterbox = {
-        "artifacts_dir": "engines/chatterbox_pt_br",
-        "reference": {"status": "pending"},
-    }
-    if chatterbox_state != expected_chatterbox:
-        engines["chatterbox_pt_br"] = expected_chatterbox
+    chatterbox_state = dict(engines.get("chatterbox_pt_br") or {})
+    chatterbox_state.setdefault("artifacts_dir", "engines/chatterbox_pt_br")
+    chatterbox_state.setdefault("reference", {"status": "pending"})
+    if engines.get("chatterbox_pt_br") != chatterbox_state:
+        engines["chatterbox_pt_br"] = chatterbox_state
         changed = True
 
     expected_model_embeddings = {
@@ -454,6 +458,7 @@ def _public(profile: Dict[str, Any]) -> Dict[str, Any]:
         "styles": profile.get("styles", {"items": []}),
         "events": profile.get("events", {"items": {}}),
         "model_embeddings": profile.get("model_embeddings", {}),
+        "engines": profile.get("engines", {}),
         "has_preview": preview_path(voice_id).exists(),
         "has_previous_preview": previous_preview_path(voice_id).exists(),
         "disk_bytes": _dir_size(_voice_dir(voice_id)),
@@ -634,9 +639,11 @@ def _normalize_reference_audio(audio_bytes: bytes, original_ext: str) -> Tuple[n
         os.unlink(tmp_path)
 
     sr_original, ch_original = _probe_original(audio_bytes, ext)
-    trimmed, _ = _trim_silence(np.asarray(audio, dtype=np.float32))
+    source_audio = np.asarray(audio, dtype=np.float32)
+    trimmed, _ = _trim_silence(source_audio)
     normalized = trimmed if len(trimmed) else np.asarray(audio, dtype=np.float32)
     analysis = analyze_reference(normalized, sr_original, ch_original)
+    analysis["silence_trimmed_seconds"] = round((len(source_audio) - len(normalized)) / SAMPLE_RATE, 2)
     if analysis["quality_status"] == "invalid":
         raise InvalidVoice(
             "A amostra não contém fala suficiente para criar uma referência "
@@ -644,6 +651,24 @@ def _normalize_reference_audio(audio_bytes: bytes, original_ext: str) -> Tuple[n
             analysis,
         )
     return normalized, analysis
+
+
+def _derive_chatterbox_reference(audio: np.ndarray, analysis: Dict[str, Any]) -> Tuple[Optional[np.ndarray], Dict[str, Any]]:
+    capped = audio[: int(CHATTERBOX_REFERENCE_MAX_SECONDS * SAMPLE_RATE)]
+    duration = round(len(capped) / SAMPLE_RATE, 2)
+    metadata = {
+        "duration_seconds": duration,
+        "silence_trimmed_seconds": analysis.get("silence_trimmed_seconds", 0.0),
+        "clipping_detected": analysis.get("clipping_detected", False),
+    }
+    if duration < CHATTERBOX_REFERENCE_MIN_SECONDS:
+        metadata.update({
+            "status": "failed",
+            "error": "A amostra não contém 8 segundos úteis de fala limpa para o Chatterbox.",
+        })
+        return None, metadata
+    metadata["status"] = "ready"
+    return capped, metadata
 
 
 def _normalize_event_audio(audio_bytes: bytes, original_ext: str) -> np.ndarray:
@@ -819,6 +844,12 @@ def create_voice(
     pcm = (np.clip(reference, -1.0, 1.0) * 32767).astype(np.int16)
     wavfile.write(str(reference_path(voice_id)), SAMPLE_RATE, pcm)
     ref_hash = hashlib.sha256(reference_path(voice_id).read_bytes()).hexdigest()
+    chatterbox_reference, chatterbox_metadata = _derive_chatterbox_reference(reference, analysis)
+    if chatterbox_reference is not None:
+        chatterbox_path = chatterbox_reference_path(voice_id)
+        wavfile.write(str(chatterbox_path), SAMPLE_RATE, (np.clip(chatterbox_reference, -1.0, 1.0) * 32767).astype(np.int16))
+        chatterbox_metadata["path"] = "engines/chatterbox_pt_br/reference.wav"
+        chatterbox_metadata["hash"] = hashlib.sha256(chatterbox_path.read_bytes()).hexdigest()
 
     profile = {
         "id": voice_id,
@@ -852,7 +883,7 @@ def create_voice(
             "vibevoice_1_5b": _default_engine_state(),
             "chatterbox_pt_br": {
                 "artifacts_dir": "engines/chatterbox_pt_br",
-                "reference": {"status": "pending"},
+                "reference": chatterbox_metadata,
             },
         },
         "model_embeddings": {

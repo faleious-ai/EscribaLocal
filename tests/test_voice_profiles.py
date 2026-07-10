@@ -110,6 +110,31 @@ def test_reference_is_mono_24khz(client, fake_builder):
     assert len(data) / sr < 3.9
 
 
+def test_chatterbox_reference_is_capped_and_exposed(client, fake_builder):
+    response = _upload(client, content=make_speech_wav(seconds=12.0))
+    assert response.status_code == 200, response.text
+    voice = response.json()["voice"]
+    reference = voice["engines"]["chatterbox_pt_br"]["reference"]
+
+    assert reference["status"] == "ready"
+    assert reference["duration_seconds"] == 10.0
+    assert voice_profiles.chatterbox_reference_path(voice["id"]).exists()
+    listened = client.get(f"/api/tts/voices/{voice['id']}/references/chatterbox")
+    assert listened.status_code == 200
+
+
+def test_short_voice_reports_chatterbox_reference_failure_without_losing_original(client, fake_builder):
+    response = _upload(client)
+    assert response.status_code == 200, response.text
+    voice = response.json()["voice"]
+    reference = voice["engines"]["chatterbox_pt_br"]["reference"]
+
+    assert reference["status"] == "failed"
+    assert "8 segundos" in reference["error"]
+    assert voice_profiles.reference_path(voice["id"]).exists()
+    assert not voice_profiles.chatterbox_reference_path(voice["id"]).exists()
+
+
 # ------------------------------------------------------- listagem/persistência
 
 def test_list_only_custom_real_voices(client, fake_builder):

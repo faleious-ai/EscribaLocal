@@ -371,10 +371,17 @@ class ChatterboxAdapter:
             )
 
         try:
-            voice_profiles.get_voice(resolved_voice_id)
-            ref_path = str(voice_profiles.reference_path(resolved_voice_id))
+            profile = voice_profiles.get_voice(resolved_voice_id)
+            ref_path = str(voice_profiles.chatterbox_reference_path(resolved_voice_id))
+            # Perfis legados (e os doubles de testes) ainda não possuem o
+            # estado por engine; eles continuam usando a referência canônica.
+            if not os.path.exists(ref_path) and "engines" not in profile:
+                ref_path = str(voice_profiles.reference_path(resolved_voice_id))
             if not os.path.exists(ref_path):
-                raise VoiceUnavailableError(f"Arquivo de voz {resolved_voice_id} ausente no disco.")
+                raise VoiceUnavailableError(
+                    f"A voz {resolved_voice_id} não possui referência Chatterbox utilizável. "
+                    "Grave ao menos 8 segundos úteis de fala limpa."
+                )
         except Exception as exc:
             raise VoiceUnavailableError(f"Voz {resolved_voice_id} indisponivel: {exc}")
 

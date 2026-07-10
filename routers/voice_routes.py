@@ -432,6 +432,17 @@ async def get_reference_audio(voice_id: str):
     return FileResponse(str(path), media_type="audio/wav")
 
 
+@router.get("/voices/{voice_id}/references/chatterbox")
+async def get_chatterbox_reference_audio(voice_id: str):
+    try:
+        path = voice_profiles.chatterbox_reference_path(voice_id)
+    except voice_profiles.VoiceNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    if not path.exists():
+        raise HTTPException(status_code=422, detail="Referência Chatterbox ainda não está utilizável.")
+    return FileResponse(str(path), media_type="audio/wav")
+
+
 @router.get("/voices/{voice_id}/preview")
 async def get_preview_audio(voice_id: str, previous: bool = False):
     try:
