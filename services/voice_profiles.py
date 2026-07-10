@@ -36,6 +36,13 @@ ALLOWED_EXTENSIONS = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".webm", ".opus",
 MAX_UPLOAD_BYTES = 60 * 1024 * 1024
 MIN_DURATION_SECONDS = 0.5
 EMBEDDINGS_FILENAME = "vibevoice_1_5b.pt"
+EVENT_TYPES = {
+    "breath_short": "Respiração curta",
+    "breath_deep": "Respiração profunda",
+    "sigh": "Suspiro",
+    "laugh_soft": "Risada leve",
+}
+EVENT_SOURCES = {"upload", "recording"}
 
 _UUID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _LEGACY_WINDOWS_VOICE_PATTERN = re.compile(r"^(preset_windows_[1-4]|speaker_[1-4])$")
@@ -121,6 +128,17 @@ def _styles_dir(voice_id: str) -> Path:
 
 def _events_dir(voice_id: str) -> Path:
     return _voice_dir(voice_id) / "events"
+
+
+def _validate_event_id(event_id: str) -> str:
+    normalized = str(event_id or "").strip().lower()
+    if normalized not in EVENT_TYPES:
+        raise InvalidVoice(f"Evento vocal inválido: {event_id!r}.")
+    return normalized
+
+
+def _event_file_path(voice_id: str, event_id: str) -> Path:
+    return _events_dir(voice_id) / f"{_validate_event_id(event_id)}.wav"
 
 
 def _previews_dir(voice_id: str) -> Path:
@@ -350,7 +368,7 @@ def _ensure_profile_schema(profile: Dict[str, Any]) -> bool:
             changed = True
 
     events = profile.get("events")
-    if not isinstance(events, dict) or "items" not in events:
+    if not isinstance(events, dict) or not isinstance(events.get("items"), dict):
         profile["events"] = {"items": {}}
         changed = True
 
@@ -434,6 +452,7 @@ def _public(profile: Dict[str, Any]) -> Dict[str, Any]:
         "analysis": profile.get("analysis"),
         "validation": profile.get("validation"),
         "styles": profile.get("styles", {"items": []}),
+        "events": profile.get("events", {"items": {}}),
         "model_embeddings": profile.get("model_embeddings", {}),
         "has_preview": preview_path(voice_id).exists(),
         "has_previous_preview": previous_preview_path(voice_id).exists(),
@@ -625,6 +644,146 @@ def _normalize_reference_audio(audio_bytes: bytes, original_ext: str) -> Tuple[n
             analysis,
         )
     return normalized, analysis
+
+
+def _normalize_event_audio(audio_bytes: bytes, original_ext: str) -> np.ndarray:
+    ext = (original_ext or "").lower()
+    if not ext.startswith("."):
+        ext = "." + ext
+    if ext not in ALLOWED_EXTENSIONS:
+        raise InvalidVoice(f"Formato não suportado: {ext}. Use {', '.join(sorted(ALLOWED_EXTENSIONS))}.")
+    if not audio_bytes or len(audio_bytes) < 128:
+        raise InvalidVoice("Arquivo de áudio vazio ou pequeno demais.")
+    if len(audio_bytes) > MAX_UPLOAD_BYTES:
+        raise InvalidVoice("Arquivo acima de 60MB; envie uma amostra menor.")
+
+    from services.transcriber import decode_audio_ffmpeg
+
+    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+        tmp.write(audio_bytes)
+        tmp_path = tmp.name
+    try:
+        try:
+            audio = decode_audio_ffmpeg(tmp_path, sampling_rate=SAMPLE_RATE)
+        except Exception as exc:
+            raise InvalidVoice(f"Não foi possível decodificar o áudio: {exc}")
+    finally:
+        os.unlink(tmp_path)
+
+    normalized = np.asarray(audio, dtype=np.float32).reshape(-1)
+    if not len(normalized) or not np.all(np.isfinite(normalized)):
+        raise InvalidVoice("Evento vocal sem áudio válido.")
+    if float(np.max(np.abs(normalized))) < 1e-4:
+        raise InvalidVoice("Evento vocal sem sinal de áudio detectável.")
+    return np.clip(normalized, -1.0, 1.0)
+
+
+def set_event(
+    voice_id: str,
+    event_id: str,
+    *,
+    audio_bytes: bytes,
+    original_ext: str,
+    source: str,
+) -> Dict[str, Any]:
+    profile = _load_profile(voice_id)
+    event_id = _validate_event_id(event_id)
+    normalized_source = str(source or "").strip().lower()
+    if normalized_source not in EVENT_SOURCES:
+        raise InvalidVoice(f"Origem de evento inválida: {source!r}.")
+
+    audio = _normalize_event_audio(audio_bytes, original_ext)
+    pcm = (audio * 32767).astype(np.int16)
+    path = _event_file_path(voice_id, event_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    fd, staged_name = tempfile.mkstemp(
+        dir=str(path.parent),
+        prefix=f".{event_id}-",
+        suffix=".wav.tmp",
+    )
+    os.close(fd)
+    staged_path = Path(staged_name)
+    backup_path: Optional[Path] = None
+    installed = False
+    profile_saved = False
+    try:
+        wavfile.write(str(staged_path), SAMPLE_RATE, pcm)
+        items = profile.setdefault("events", {"items": {}}).setdefault("items", {})
+        previous = dict(items.get(event_id) or {})
+        now = _now_iso()
+        event = {
+            "event_id": event_id,
+            "name": EVENT_TYPES[event_id],
+            "source": normalized_source,
+            "path": f"events/{event_id}.wav",
+            "hash": hashlib.sha256(staged_path.read_bytes()).hexdigest(),
+            "sample_rate": SAMPLE_RATE,
+            "duration_seconds": round(len(audio) / SAMPLE_RATE, 3),
+            "created_at": previous.get("created_at", now),
+            "updated_at": now,
+        }
+        items[event_id] = event
+
+        if path.exists():
+            fd, backup_name = tempfile.mkstemp(
+                dir=str(path.parent),
+                prefix=f".{event_id}-",
+                suffix=".wav.bak",
+            )
+            os.close(fd)
+            backup_path = Path(backup_name)
+            backup_path.unlink()
+            os.replace(path, backup_path)
+        os.replace(staged_path, path)
+        installed = True
+        _save_profile(profile)
+        profile_saved = True
+    except Exception:
+        if installed:
+            path.unlink(missing_ok=True)
+        if backup_path is not None and backup_path.exists():
+            os.replace(backup_path, path)
+        raise
+    finally:
+        staged_path.unlink(missing_ok=True)
+        if profile_saved and backup_path is not None:
+            backup_path.unlink(missing_ok=True)
+
+    record_app_event("voice_event_set", voice_id=voice_id, event_id=event_id, source=normalized_source)
+    return dict(event)
+
+
+def list_events(voice_id: str) -> List[Dict[str, Any]]:
+    profile = _load_profile(voice_id)
+    items = (profile.get("events") or {}).get("items") or {}
+    return [dict(items[event_id]) for event_id in EVENT_TYPES if event_id in items]
+
+
+def event_audio_path(voice_id: str, event_id: str) -> Path:
+    profile = _load_profile(voice_id)
+    event_id = _validate_event_id(event_id)
+    items = (profile.get("events") or {}).get("items") or {}
+    path = _event_file_path(voice_id, event_id)
+    if event_id not in items or not path.exists():
+        raise VoiceNotFound(f"Evento vocal não encontrado: {event_id!r}")
+    return path
+
+
+def delete_event(voice_id: str, event_id: str) -> Dict[str, str]:
+    profile = _load_profile(voice_id)
+    event_id = _validate_event_id(event_id)
+    items = (profile.get("events") or {}).get("items") or {}
+    if event_id not in items:
+        raise VoiceNotFound(f"Evento vocal não encontrado: {event_id!r}")
+
+    path = _event_file_path(voice_id, event_id)
+    if path.exists():
+        path.unlink()
+    del items[event_id]
+    _save_profile(profile)
+    record_app_event("voice_event_deleted", voice_id=voice_id, event_id=event_id)
+    return {"deleted": event_id}
 
 
 # ------------------------------------------------------------------- criação

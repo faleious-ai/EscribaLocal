@@ -143,6 +143,56 @@ async def patch_voice(voice_id: str, body: VoicePatch):
         raise _http_error(exc)
 
 
+@router.get("/voices/{voice_id}/events")
+async def list_events(voice_id: str):
+    try:
+        return {"items": voice_profiles.list_events(voice_id)}
+    except Exception as exc:
+        raise _http_error(exc)
+
+
+@router.post("/voices/{voice_id}/events/{event_id}")
+async def upload_event(
+    voice_id: str,
+    event_id: str,
+    file: UploadFile = File(...),
+    source: str = Form("upload"),
+):
+    content = await file.read()
+    ext = os.path.splitext(file.filename or "")[1] or ".webm"
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(
+            None,
+            lambda: voice_profiles.set_event(
+                voice_id,
+                event_id,
+                audio_bytes=content,
+                original_ext=ext,
+                source=source,
+            ),
+        )
+    except Exception as exc:
+        raise _http_error(exc)
+
+
+@router.get("/voices/{voice_id}/events/{event_id}")
+async def get_event_audio(voice_id: str, event_id: str):
+    try:
+        path = voice_profiles.event_audio_path(voice_id, event_id)
+    except Exception as exc:
+        raise _http_error(exc)
+    return FileResponse(str(path), media_type="audio/wav")
+
+
+@router.delete("/voices/{voice_id}/events/{event_id}")
+async def delete_event(voice_id: str, event_id: str):
+    try:
+        return voice_profiles.delete_event(voice_id, event_id)
+    except Exception as exc:
+        raise _http_error(exc)
+
+
 @router.get("/voices/{voice_id}/styles")
 async def list_styles(voice_id: str):
     try:

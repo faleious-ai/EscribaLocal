@@ -23,6 +23,18 @@ def make_speech_wav(seconds=4.0, sr=48000, stereo=True) -> bytes:
     return buffer.getvalue()
 
 
+def make_event_wav(seconds=0.2, sr=44100, stereo=True, amplitude=0.08) -> bytes:
+    """Evento curto nao falado; seria invalido como referencia vocal."""
+    t = np.linspace(0, seconds, int(sr * seconds), endpoint=False)
+    audio = amplitude * np.sin(2 * np.pi * 80 * t)
+    pcm = (audio * 32767).astype(np.int16)
+    if stereo:
+        pcm = np.stack([pcm, pcm], axis=1)
+    buffer = io.BytesIO()
+    wavfile.write(buffer, sr, pcm)
+    return buffer.getvalue()
+
+
 @pytest.fixture()
 def fake_builder(monkeypatch):
     """Builder de embeddings falso (sem GPU/modelo) com contador de chamadas."""
@@ -782,3 +794,157 @@ def test_duplicate_style_rolls_back_when_media_copy_fails(
 
     listed = client.get(f"/api/tts/voices/{voice['id']}/styles").json()["items"]
     assert [item["style_id"] for item in listed] == [style["style_id"]]
+
+
+@pytest.mark.parametrize("event_id", voice_profiles.EVENT_TYPES)
+def test_user_can_import_and_listen_to_canonical_event(
+    client,
+    fake_builder,
+    isolated_voices,
+    event_id,
+):
+    voice = _upload(client, name="Voz com evento").json()["voice"]
+
+    imported = client.post(
+        f"/api/tts/voices/{voice['id']}/events/{event_id}",
+        files={"file": ("evento.wav", make_event_wav(), "audio/wav")},
+        data={"source": "upload"},
+    )
+
+    assert imported.status_code == 200, imported.text
+    event = imported.json()
+    assert event["event_id"] == event_id
+    assert event["source"] == "upload"
+    assert event["sample_rate"] == 24000
+    assert len(event["hash"]) == 64
+
+    listed = client.get(f"/api/tts/voices/{voice['id']}/events")
+    assert listed.status_code == 200
+    assert listed.json()["items"] == [event]
+
+    profile = client.get(f"/api/tts/voices/{voice['id']}").json()
+    assert profile["events"]["items"][event_id] == event
+
+    fetched = client.get(f"/api/tts/voices/{voice['id']}/events/{event_id}")
+    assert fetched.status_code == 200
+    assert fetched.headers["content-type"] == "audio/wav"
+    sample_rate, audio = wavfile.read(io.BytesIO(fetched.content))
+    assert sample_rate == 24000
+    assert audio.ndim == 1
+
+    event_path = isolated_voices / voice["id"] / "events" / f"{event_id}.wav"
+    assert event_path.exists()
+
+
+def test_user_can_record_replace_and_delete_event(client, fake_builder, isolated_voices):
+    voice = _upload(client, name="Voz com evento substituivel").json()["voice"]
+    endpoint = f"/api/tts/voices/{voice['id']}/events/sigh"
+
+    imported = client.post(
+        endpoint,
+        files={"file": ("suspiro.wav", make_event_wav(seconds=0.2), "audio/wav")},
+        data={"source": "upload"},
+    )
+    assert imported.status_code == 200, imported.text
+
+    recorded = client.post(
+        endpoint,
+        files={"file": ("suspiro-gravado.wav", make_event_wav(seconds=0.35), "audio/wav")},
+        data={"source": "recording"},
+    )
+    assert recorded.status_code == 200, recorded.text
+    assert recorded.json()["event_id"] == "sigh"
+    assert recorded.json()["source"] == "recording"
+    assert recorded.json()["hash"] != imported.json()["hash"]
+    assert recorded.json()["created_at"] == imported.json()["created_at"]
+
+    deleted = client.delete(endpoint)
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json() == {"deleted": "sigh"}
+    assert client.get(endpoint).status_code == 404
+    assert client.get(f"/api/tts/voices/{voice['id']}/events").json()["items"] == []
+
+    profile = client.get(f"/api/tts/voices/{voice['id']}")
+    assert profile.status_code == 200
+    assert profile.json()["events"]["items"] == {}
+    voice_dir = isolated_voices / voice["id"]
+    assert voice_dir.exists()
+    assert (voice_dir / "reference.wav").exists()
+
+
+def test_replacing_event_rolls_back_media_when_profile_save_fails(
+    client,
+    fake_builder,
+    isolated_voices,
+    monkeypatch,
+):
+    voice = _upload(client, name="Voz com evento preservado").json()["voice"]
+    endpoint = f"/api/tts/voices/{voice['id']}/events/sigh"
+    created = client.post(
+        endpoint,
+        files={"file": ("suspiro.wav", make_event_wav(seconds=0.2), "audio/wav")},
+        data={"source": "upload"},
+    )
+    assert created.status_code == 200, created.text
+
+    voice_dir = isolated_voices / voice["id"]
+    event_path = voice_dir / "events" / "sigh.wav"
+    profile_path = voice_dir / "profile.json"
+    original_audio = event_path.read_bytes()
+    original_event = json.loads(profile_path.read_text(encoding="utf-8"))["events"]["items"]["sigh"]
+
+    def fail_save(_profile):
+        raise OSError("falha de perfil simulada")
+
+    monkeypatch.setattr(voice_profiles, "_save_profile", fail_save)
+    replaced = client.post(
+        endpoint,
+        files={"file": ("suspiro-novo.wav", make_event_wav(seconds=0.35), "audio/wav")},
+        data={"source": "recording"},
+    )
+
+    assert replaced.status_code == 500
+    assert replaced.json()["detail"] == "falha de perfil simulada"
+    assert event_path.read_bytes() == original_audio
+    persisted = json.loads(profile_path.read_text(encoding="utf-8"))
+    assert persisted["events"]["items"]["sigh"] == original_event
+
+
+def test_event_errors_are_explicit_without_creating_fallback_media(
+    client,
+    fake_builder,
+    isolated_voices,
+):
+    voice = _upload(client, name="Voz sem evento").json()["voice"]
+    base = f"/api/tts/voices/{voice['id']}/events"
+
+    invalid_id = client.post(
+        f"{base}/thunder",
+        files={"file": ("evento.wav", make_event_wav(), "audio/wav")},
+        data={"source": "upload"},
+    )
+    assert invalid_id.status_code == 422
+    assert "evento vocal" in invalid_id.text.lower()
+
+    invalid_source = client.post(
+        f"{base}/laugh_soft",
+        files={"file": ("risada.wav", make_event_wav(), "audio/wav")},
+        data={"source": "synthetic"},
+    )
+    assert invalid_source.status_code == 422
+    assert "origem" in invalid_source.text.lower()
+
+    silent = client.post(
+        f"{base}/breath_short",
+        files={"file": ("silencio.wav", make_event_wav(amplitude=0.0), "audio/wav")},
+        data={"source": "upload"},
+    )
+    assert silent.status_code == 422
+    assert "sinal" in silent.text.lower()
+
+    assert client.get(f"{base}/breath_deep").status_code == 404
+    assert client.delete(f"{base}/breath_deep").status_code == 404
+    assert client.get(base).json()["items"] == []
+
+    event_dir = isolated_voices / voice["id"] / "events"
+    assert list(event_dir.glob("*.wav")) == []

@@ -1,6 +1,6 @@
 # TTS Issue Execution Plan
 
-Data: 2026-07-07
+Data: 2026-07-10
 
 ## Objetivo desta rodada
 
@@ -100,8 +100,8 @@ Issues históricas fechadas relevantes:
 | --- | --- | --- |
 | `T0.1`, `T0.2`, `T1.1`, `T1.2`, `T1.3`, `T9.3`, `T10.1` | histórico disperso em `#1`, `#2`, `#5`, `#6`, `#13` | Gate A auditável e coerente |
 | `T2.1` | sem issue clara | implementado e verificado no ledger; precisa rastreio histórico mínimo |
-| `T2.2` | sem issue clara | em progresso real no código; precisa issue própria |
-| `T2.3` | sem issue clara | ainda não iniciada |
+| `T2.2` | `#16` | verificada no ledger e fechada como concluída |
+| `T2.3` | `#17` | triada como `ready-for-agent`; implementação e testes concluídos localmente, aguardando publicação e fechamento |
 | `T2.4` | sem issue clara | parcialmente coberta por capabilities de import/export de voz, mas não por pacote versionado completo com estilos/eventos |
 | `T3.1` | `#7` (parcial / insuficiente) | issue fechada não cobre todo o aceite do escopo consolidado |
 | `T3.2`, `T3.3` | sem issue clara | ainda não rastreadas |
@@ -114,7 +114,7 @@ Issues históricas fechadas relevantes:
 | `T10.2`, `T10.3` | `#8` + `#13` | dependem da decisão humana e do ADR |
 | `T14.4`, `T14.5` | `#12` | issue final continua válida |
 
-## Trabalho implementado sem issue clara
+## Trabalho inicialmente implementado sem issue clara (diagnóstico histórico)
 
 - `T2.1` schema de voz v2 em `services/voice_profiles.py`
 - `T2.2` backend/API de estilos:
@@ -128,11 +128,15 @@ Issues históricas fechadas relevantes:
   - remoção da referência
   - leitura de mídia original e normalizada por HTTP
 
+O desvio de rastreio de `T2.2` foi resolvido pela issue `#16`. `T2.3` foi
+formalizada antes da implementação na issue `#17`.
+
 ## Trabalho já resolvido pelo código mas mal representado no tracker
 
 - Gate A no geral está melhor representado pelo ledger do que pelas issues históricas.
-- `T2.1` e grande parte do `T2.2` já estão no código publicado em `main`, mas não
-  possuem issue dedicada aberta.
+- `T2.1` permanece sem issue histórica dedicada.
+- `T2.2` foi reconciliada com a issue `#16`, evidências publicadas e fechamento.
+- `T2.3` está rastreada pela issue `#17` desde antes da implementação.
 
 ## Issues amplas demais ou desalinhadas
 
@@ -200,35 +204,36 @@ Tratamento recomendado:
 - manter o ledger alinhado aos commits `03e28743`/`ff81eb75` e ao fechamento da
   issue `#16`.
 
-## T2.2 encerrada e próxima issue para triagem
+## T2.2 encerrada e T2.3 em conclusão
 
 Issue concluída:
 
 - `#16` `AFK: Formalizar e concluir T2.2 da entidade Style` — fechada como
   `completed` após sincronização de aceite, testes e evidências.
 
-Próxima candidata única:
+Issue operacional atual:
 
-- `#17` `AFK: Implementar T2.3 da entidade Event` — permanece `needs-triage` e
-  deve ser avaliada antes de qualquer implementação.
+- `#17` `AFK: Implementar T2.3 da entidade Event` — triada como
+  `ready-for-agent`; implementação e suíte completa concluídas localmente em
+  2026-07-10. Restam publicação, sincronização das evidências e fechamento.
 
 Atualização do tracker em 2026-07-09:
 
 - `#16` fechada como `completed`
-- `#17` aberta como `needs-triage`
+- `#17` criada como `needs-triage`; posteriormente triada para `ready-for-agent`
 - `#18` `AFK: Implementar T3.1 de captura real da primeira voz no wizard`
 
 ## Ordem operacional recomendada
 
 1. `T2.2 — Formalizar e concluir entidade Style` — concluída
-2. `T2.3 — Implementar entidade Event` — próxima, após triagem de `#17`
-3. `T3.1 — Captura real da primeira voz no wizard`
+2. `T2.3 — Implementar entidade Event` — em conclusão pela issue `#17`
+3. `T3.1 — Captura real da primeira voz no wizard` — próxima candidata, somente após fechar `#17` e triar `#18`
 4. proposta de divisão `T4.x / T5.x / T6.x / T7.x`
 
 Regra de governança:
 
-- não puxar `T4.x` ou posterior enquanto `T2.2` e `T2.3` estiverem sem issue
-  clara ou sem critério de parada formal;
+- não puxar `T4.x` ou posterior antes de concluir `T2.3` e formalizar a ordem de
+  execução posterior;
 - não tratar `#12` como próxima execução operacional;
 - não deixar subfatias de `Style` nascerem fora da issue dedicada.
 
@@ -237,6 +242,11 @@ Regra de governança:
 ### Fechadas
 
 - `#16` — aceite e evidências consolidados; fechada como `completed`
+
+### Em conclusão
+
+- `#17` — implementação e testes locais concluídos; aguarda commit publicado,
+  checklist/evidências no tracker e fechamento
 
 ### Dividir
 
