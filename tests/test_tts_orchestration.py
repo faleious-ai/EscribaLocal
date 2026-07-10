@@ -4,11 +4,13 @@ from services.tts_orchestration import TtsOrchestrationError, orchestrate_tts, p
 
 
 def test_render_plan_is_ordered_and_serializable():
-    plan = build_render_plan(parse_script("[calmo]\nOlá 2.\n[/calmo]\nTchau."), voice_id="voice-a", reference="ref.wav")
+    ast = parse_script("[calmo]\nOlá 2.\n[/calmo]\nTchau.")
+    plan = build_render_plan(ast, voice_id="voice-a", reference="ref.wav")
     assert [job.order for job in plan.jobs] == [0, 1]
     assert plan.jobs[0].style_id == "calmo"
     assert plan.jobs[0].original_text == "Olá 2."
     assert plan.manifest()["jobs"][1]["normalized_text"] == "Tchau."
+    assert [job.job_id for job in plan.jobs] == [job.job_id for job in build_render_plan(ast, voice_id="voice-a", reference="ref.wav").jobs]
 
 
 def test_validator_resolves_style_alias_and_event(monkeypatch):
