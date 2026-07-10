@@ -15,9 +15,40 @@ continuar, preservando alterações locais e sem descartar commits. Depois da
 consolidação local, remova a branch paralela local quando ela não for mais
 necessária.
 
-Mesmo trabalhando em `main`, continue respeitando as proteções deste arquivo:
-não faça commit, push, merge remoto, rebase, release, deploy ou alterações
-remotas sem autorização explícita.
+### Autorização permanente para issues delimitadas
+
+Decisão operacional vigente: o usuário autoriza permanentemente o agente a
+realizar, sem pedir ou aguardar nova confirmação, todas as ações necessárias
+para concluir uma issue delimitada deste repositório.
+
+Uma issue está delimitada quando:
+
+* pertence a `faleious-ai/EscribaLocal` e está identificada por número ou título;
+* possui objetivo, escopo, fora de escopo, critérios de aceite e critério de
+  parada claros na própria issue ou nos documentos de precedência do projeto;
+* está `ready-for-agent` ou foi escolhida explicitamente pelo usuário;
+* não depende de decisão humana pendente, informação ausente ou ampliação de
+  escopo.
+
+Dentro desses limites, estão previamente autorizados:
+
+* leitura, edição, testes, instalação de dependências necessárias e atualização
+  de documentação, ledger e planos;
+* commits e push diretamente em `main`;
+* comentários, edição, labels, fechamento ou reabertura de GitHub Issues;
+* outras alterações remotas no próprio repositório exigidas pelo aceite;
+* tag, release ou deploy somente quando forem requisitos explícitos da issue.
+
+A autorização não permite criar branches, ampliar o escopo, reescrever histórico,
+usar comandos Git destrutivos, apagar dados não pertencentes à issue, modificar
+segredos reais ou atuar em sistemas externos que não estejam explicitamente no
+escopo. Issues `ready-for-human`, `needs-info`, `needs-triage` ou bloqueadas por
+decisão humana exigem resolver esse estado antes da execução autônoma.
+
+O agente deve executar testes e revisão proporcionais ao risco, registrar
+evidências no tracker/ledger, respeitar o critério de parada e relatar as ações
+remotas depois de concluí-las; não deve interromper o fluxo apenas para pedir
+autorização já concedida por este protocolo.
 
 ### Skills e ambiente do agente
 
@@ -163,6 +194,8 @@ com esforço `Leve`.
 * Não amplie o escopo sem autorização.
 * Não reescreva a aplicação quando uma alteração incremental for viável.
 * Não exponha nem modifique segredos ou credenciais reais.
-* Não faça commit, push, merge, rebase, release, deploy ou alterações remotas sem autorização explícita.
+* Para issues delimitadas, use a autorização permanente deste arquivo e conclua
+  autonomamente commits, push e atualizações remotas necessárias; fora desses
+  limites, obtenha decisão explícita do usuário.
 * Execute testes e verificações relevantes antes de declarar o trabalho concluído.
 * Revise o diff final e informe verificações que não puderam ser executadas.
