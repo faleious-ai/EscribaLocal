@@ -190,25 +190,25 @@ microissues separadas:
 - duplicação da referência normalizada e do original junto com o estilo
 - falha explícita e sem cópia órfã quando a referência marcada como pronta está
   incompleta
-- rollback integral da cópia quando a escrita de mídia falha durante a
-  duplicação
+- remoção da cópia criada e ressincronização do perfil quando a primeira ou a
+  segunda escrita de mídia falha; falha do próprio rollback permanece explícita
 
 Tratamento recomendado:
 
 - não abrir issue separada para cada uma;
 - registrar tudo como checklist de evidências dentro da issue `#16`;
-- atualizar o ledger distinguindo o código publicado do diff local ainda não
-  publicado.
+- atualizar o ledger distinguindo o código publicado em `03e28743` da validação
+  adicional ainda local.
 
 ## Próxima issue única em execução
 
 Continuar exclusivamente na issue AFK dedicada a `T2.2`:
 
-**Título sugerido:** `AFK: Formalizar e concluir T2.2 da entidade Style`
+**Issue:** `#16` `AFK: Formalizar e concluir T2.2 da entidade Style`
 
-**Motivo:** o aceite de backend está coberto e testado; falta sincronizar as
-evidências da issue `#16` e publicar o diff local somente após autorização,
-antes de pular para `T2.3` ou para parser/orchestration.
+**Motivo:** o aceite de backend foi publicado em `03e28743` e está testado;
+falta publicar a validação adicional somente após autorização e sincronizar as
+evidências da issue `#16`, antes de pular para `T2.3` ou parser/orchestration.
 
 Atualização do tracker em 2026-07-07:
 
@@ -276,7 +276,7 @@ Gate A está fechado no ledger. Em Gate B, `T2.1` já está verificado e `T2.2` 
 Antes de tratar esta issue como próxima executável, recomenda-se formalizar novas issues operacionais alinhadas ao escopo consolidado atual.
 ```
 
-## Texto sugerido para nova issue de `T2.2` (não publicar nesta rodada)
+## Registro histórico do texto usado para a issue `#16`
 
 ```text
 ## Parent
@@ -292,10 +292,31 @@ Formalizar e concluir a entidade `Style` dentro de cada voz, consolidando o que 
 - [ ] CRUD de estilos permanece coberto por testes de ponta a ponta
 - [ ] `style_id` continua estável mesmo com rename do nome visível
 - [ ] referência opcional de estilo continua normalizada e persistida com mídia original e derivada
-- [ ] ledger distingue o estado já publicado do diff local de `T2.2`
+- [ ] ledger registra `03e28743` como publicado e separa validação local posterior
 - [ ] pendências restantes de `T2.2` ficam explicitadas sem misturar `T2.3` ou `T4.x`
 
 ## Blocked by
 
 None - can start immediately
+```
+
+## Texto proposto para atualização da issue `#16` (não publicado)
+
+```text
+T2.2 está implementado em `main` pelo commit `03e28743`.
+
+Evidências consolidadas:
+- CRUD de estilos persistidos em `style.json` e sincronizados em `profile.json`;
+- `style_id` estável com rename do nome visível;
+- criar, duplicar, editar, ordenar, ativar/desativar e excluir cobertos por testes;
+- referência opcional com original e derivada, incluindo limpeza e leitura HTTP;
+- duplicação preserva metadados e copia `reference.wav` e `original.wav`;
+- mídia marcada como pronta mas incompleta falha antes de criar a cópia;
+- falha na primeira ou segunda cópia de mídia remove a cópia criada e ressincroniza o perfil; falha do rollback é reportada explicitamente.
+
+Validação local posterior ao commit: `python -m pytest -q` -> `236 passed`, `4 warnings` conhecidas de `FastAPI.on_event`.
+
+Fora de T2.2/#16: preview por engine real, UI completa de estilos, Event, parser/AST, RenderPlan, AudioAssembler, timeline, wizard e capability matrix operacional.
+
+Pendente antes do fechamento: publicar a validação adicional mediante autorização, sincronizar checklist/evidências desta issue e então atualizar o ledger para `verified`.
 ```

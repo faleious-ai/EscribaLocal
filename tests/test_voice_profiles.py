@@ -663,11 +663,13 @@ def test_duplicate_style_copies_reference_media(client, fake_builder, isolated_v
     assert duplicated.status_code == 200, duplicated.text
     payload = duplicated.json()
     assert payload["style_id"] == "intimo-copia"
-    assert payload["reference"]["status"] == "ready"
+    assert payload["reference"] == uploaded_reference.json()["reference"]
 
+    source_dir = isolated_voices / voice["id"] / "styles" / style["style_id"]
     duplicated_dir = isolated_voices / voice["id"] / "styles" / payload["style_id"]
     assert (duplicated_dir / "reference.wav").exists()
     assert (duplicated_dir / "original.wav").exists()
+    assert (duplicated_dir / "original.wav").read_bytes() == (source_dir / "original.wav").read_bytes()
 
     original_reference = client.get(f"/api/tts/voices/{voice['id']}/styles/{style['style_id']}/reference")
     duplicated_reference = client.get(f"/api/tts/voices/{voice['id']}/styles/{payload['style_id']}/reference")
@@ -701,6 +703,47 @@ def test_duplicate_style_rejects_missing_ready_reference_media(client, fake_buil
     assert "refer" in duplicated.json()["detail"]["message"].lower()
     listed = client.get(f"/api/tts/voices/{voice['id']}/styles").json()["items"]
     assert [item["style_id"] for item in listed] == [style["style_id"]]
+
+
+def test_duplicate_style_rolls_back_after_partial_media_copy(
+    client,
+    fake_builder,
+    isolated_voices,
+    monkeypatch,
+):
+    voice = _upload(client, name="Estilo com copia parcial").json()["voice"]
+    style = client.post(
+        f"/api/tts/voices/{voice['id']}/styles",
+        json={"name": "Calmo"},
+    ).json()
+    uploaded = client.post(
+        f"/api/tts/voices/{voice['id']}/styles/{style['style_id']}/reference",
+        files={"file": ("referencia.wav", make_speech_wav(seconds=1.8), "audio/wav")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+
+    real_copy = voice_profiles.shutil.copy2
+    copy_count = 0
+
+    def fail_second_copy(*args, **kwargs):
+        nonlocal copy_count
+        copy_count += 1
+        if copy_count == 2:
+            raise OSError("falha simulada na segunda copia")
+        return real_copy(*args, **kwargs)
+
+    monkeypatch.setattr(voice_profiles.shutil, "copy2", fail_second_copy)
+    duplicated = client.post(
+        f"/api/tts/voices/{voice['id']}/styles/{style['style_id']}/duplicate",
+        json={"name": "Calmo copia"},
+    )
+
+    assert duplicated.status_code == 500
+    assert duplicated.json()["detail"] == "falha simulada na segunda copia"
+    profile_path = isolated_voices / voice["id"] / "profile.json"
+    persisted = json.loads(profile_path.read_text(encoding="utf-8"))
+    assert [item["style_id"] for item in persisted["styles"]["items"]] == [style["style_id"]]
+    assert not (isolated_voices / voice["id"] / "styles" / "calmo-copia").exists()
 
 
 def test_duplicate_style_rolls_back_when_media_copy_fails(
