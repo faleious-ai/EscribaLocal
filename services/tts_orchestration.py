@@ -112,6 +112,51 @@ def _uses_canonical_script_syntax(script: str) -> bool:
     )
 
 
+def validate_script_library(
+    ast: ScriptAst,
+    *,
+    voice_id: str,
+    engine_key: str = "tts_1_5b",
+    speaker_voices: Optional[Dict[str, str]] = None,
+) -> Dict[str, object]:
+    """Resolve referências do AST sem gerar áudio ou montar plano de renderização."""
+    from services import voice_profiles
+
+    profile = voice_profiles.get_voice(voice_id)
+    styles = (profile.get("styles") or {}).get("items") or []
+    by_name = {item.get("style_id"): item for item in styles}
+    for item in styles:
+        for alias in item.get("aliases", []):
+            by_name[alias] = item
+    available_events = (profile.get("events") or {}).get("items") or {}
+    event_ids = {"respiracao": "breath_short", "suspiro": "sigh", "risada": "laugh_soft"}
+    resolved_styles: Dict[str, str] = {}
+    resolved_events: List[str] = []
+
+    def walk(nodes: List[ScriptNode]) -> None:
+        for node in nodes:
+            if node.kind == "style":
+                speaker = node.parameters.get("falante")
+                if speaker and not (speaker_voices or {}).get(speaker):
+                    raise TtsOrchestrationError(f"Speaker sem voz na linha {node.line}, coluna {node.column}: {speaker}.")
+                style = by_name.get(node.text)
+                if not style or not style.get("active", True):
+                    raise TtsOrchestrationError(f"Estilo inexistente na linha {node.line}, coluna {node.column}: {node.text}.")
+                compatibility = (style.get("engine_compatibility") or {}).get(engine_key)
+                if compatibility in {"unsupported", "blocked"}:
+                    raise TtsOrchestrationError(f"Estilo incompatível com {engine_key} na linha {node.line}, coluna {node.column}.")
+                resolved_styles[node.text] = style["style_id"]
+                walk(node.children)
+            elif node.kind == "event":
+                event_id = event_ids[node.text]
+                if event_id not in available_events:
+                    raise TtsOrchestrationError(f"Evento ausente na linha {node.line}, coluna {node.column}: {node.text}.")
+                resolved_events.append(event_id)
+
+    walk(ast.nodes)
+    return {"styles": resolved_styles, "events": resolved_events}
+
+
 _speaker_line_pattern = re.compile(r"^(?:voz|voice|speaker)\s*([0-9]+)\s*:\s*(.*)$", re.IGNORECASE)
 _tag_pattern = re.compile(r"\[([a-zA-Z_][\w-]*)(?::([^\]]+))?\]")
 _valid_tags = {"style", "pause"}

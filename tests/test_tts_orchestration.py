@@ -1,6 +1,35 @@
 import pytest
 
-from services.tts_orchestration import TtsOrchestrationError, orchestrate_tts, parse_script
+from services.tts_orchestration import TtsOrchestrationError, orchestrate_tts, parse_script, validate_script_library
+
+
+def test_validator_resolves_style_alias_and_event(monkeypatch):
+    from services import voice_profiles
+
+    monkeypatch.setattr(voice_profiles, "get_voice", lambda _voice_id: {
+        "styles": {"items": [{"style_id": "acolhedor", "aliases": ["calmo"],
+                                "active": True, "engine_compatibility": {"tts_1_5b": "supported"}}]},
+        "events": {"items": {"breath_short": {"event_id": "breath_short"}}},
+    })
+    ast = parse_script("[calmo]\nOlá.\n[/calmo]\n[respiracao]")
+
+    resolved = validate_script_library(ast, voice_id="voice-a", engine_key="tts_1_5b")
+
+    assert resolved["styles"] == {"calmo": "acolhedor"}
+    assert resolved["events"] == ["breath_short"]
+
+
+def test_validator_rejects_missing_style_speaker_and_event(monkeypatch):
+    from services import voice_profiles
+
+    monkeypatch.setattr(voice_profiles, "get_voice", lambda _voice_id: {"styles": {"items": []}, "events": {"items": {}}})
+
+    with pytest.raises(TtsOrchestrationError) as excinfo:
+        validate_script_library(parse_script("[inexistente falante=ana]\nOi\n[/inexistente]\n[suspiro]"),
+                                voice_id="voice-a", speaker_voices={})
+
+    message = str(excinfo.value).lower()
+    assert "speaker sem voz" in message
 
 
 def test_parser_builds_ast_for_style_pause_event_and_subtitle():
