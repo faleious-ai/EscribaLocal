@@ -103,7 +103,7 @@ Issues históricas fechadas relevantes:
 | `T2.2` | `#16` | verificada no ledger e fechada como concluída |
 | `T2.3` | `#17` | verificada no ledger e fechada como `completed` pelo commit `c728eb87` |
 | `T2.4` | sem issue clara | parcialmente coberta por capabilities de import/export de voz, mas não por pacote versionado completo com estilos/eventos |
-| `T3.1` | `#18`; `#7` como histórico parcial | `#18` é a issue operacional vigente e aguarda triagem; `#7` não cobre todo o aceite consolidado |
+| `T3.1` | `#18`; `#7` como histórico parcial | `#18` é a issue operacional vigente, triada como `ready-for-agent`; `#7` não cobre todo o aceite consolidado |
 | `T3.2`, `T3.3` | sem issue clara | ainda não rastreadas |
 | `T4.1` | sem issue clara | ainda não rastreada |
 | `T4.2` | `#9` (parcial / insuficiente) | implementação atual cobre só parte do objetivo |
@@ -204,7 +204,7 @@ Tratamento recomendado:
 - manter o ledger alinhado aos commits `03e28743`/`ff81eb75` e ao fechamento da
   issue `#16`.
 
-## T2.2 e T2.3 encerradas; T3.1 aguarda triagem
+## T2.2 e T2.3 encerradas; T3.1 pronta para execução
 
 Issues concluídas:
 
@@ -214,29 +214,30 @@ Issues concluídas:
   após publicação de `c728eb87`, revisão, suíte completa e sincronização das
   evidências.
 
-Próxima candidata única para triagem:
+Próxima issue única para execução:
 
 - `#18` `AFK: Implementar T3.1 de captura real da primeira voz no wizard` —
-  aberta como `needs-triage`; não iniciar implementação antes do Agent Brief e
-  da transição formal para `ready-for-agent` ou outro estado adequado.
+  triada como `ready-for-agent`, com Agent Brief e limite explícito entre
+  captura de áudio da primeira voz e importação/exportação de perfil (`T2.4`).
 
 Atualização do tracker até 2026-07-10:
 
 - `#16` fechada como `completed`
 - `#17` triada, implementada e fechada como `completed`
 - evidências de `#17`: https://github.com/faleious-ai/EscribaLocal/issues/17#issuecomment-4933795039
-- `#18` permanece aberta como `needs-triage`
+- `#18` triada como `ready-for-agent`
+- Agent Brief de `#18`: https://github.com/faleious-ai/EscribaLocal/issues/18#issuecomment-4933856182
 
 ## Ordem operacional recomendada
 
 1. `T2.2 — Formalizar e concluir entidade Style` — concluída
 2. `T2.3 — Implementar entidade Event` — concluída pela issue `#17`
-3. `T3.1 — Captura real da primeira voz no wizard` — próxima candidata, somente após triar `#18`
+3. `T3.1 — Captura real da primeira voz no wizard` — próxima execução formal pela issue `#18`
 4. proposta de divisão `T4.x / T5.x / T6.x / T7.x`
 
 Regra de governança:
 
-- não puxar `T4.x` ou posterior antes de triar `#18` e formalizar a ordem de
+- não puxar `T4.x` ou posterior antes de concluir `#18` e formalizar a ordem de
   execução posterior;
 - não tratar `#12` como próxima execução operacional;
 - não deixar subfatias de `Style` nascerem fora da issue dedicada.
@@ -248,10 +249,10 @@ Regra de governança:
 - `#16` — aceite e evidências consolidados; fechada como `completed`
 - `#17` — aceite e evidências consolidados; fechada como `completed`
 
-### Próxima triagem
+### Próxima execução
 
-- `#18` — manter como `needs-triage` até revisar código real do wizard,
-  dependências e critério de prontidão
+- `#18` — implementar captura/importação de áudio da primeira voz no wizard,
+  seguindo o Agent Brief e o critério de parada
 
 ### Dividir
 
