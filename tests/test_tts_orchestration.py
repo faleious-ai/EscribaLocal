@@ -13,6 +13,52 @@ def test_render_plan_is_ordered_and_serializable():
     assert [job.job_id for job in plan.jobs] == [job.job_id for job in build_render_plan(ast, voice_id="voice-a", reference="ref.wav").jobs]
 
 
+def test_render_plan_preserves_sections_order_and_manifest_version():
+    ast = parse_script("## Abertura\nPrimeiro.\n## Encerramento\n[serio]\nSegundo 2.\n[/serio]")
+    plan = build_render_plan(ast, voice_id="voice-a", reference="refs/neutral.wav")
+    assert plan.version == 1
+    assert [job.order for job in plan.jobs] == [0, 1]
+    assert [job.section_title for job in plan.jobs] == ["Abertura", "Encerramento"]
+    assert plan.jobs[0].section_id != plan.jobs[1].section_id
+    assert plan.manifest()["jobs"][1]["section_title"] == "Encerramento"
+    assert plan.jobs[1].normalized_text == "Segundo dois."
+
+
+def test_render_plan_ids_are_stable_and_semantically_sensitive():
+    base = parse_script("## Abertura\n[calmo intensidade=0.7]\nOla.\n[/calmo]")
+    identical_a = build_render_plan(base, voice_id="voice-a", reference="refs/a.wav").jobs[0].job_id
+    identical_b = build_render_plan(base, voice_id="voice-a", reference="refs/a.wav").jobs[0].job_id
+    variants = [
+        build_render_plan(parse_script("## Outra\n[calmo intensidade=0.7]\nOla.\n[/calmo]"), voice_id="voice-a", reference="refs/a.wav").jobs[0].job_id,
+        build_render_plan(base, voice_id="voice-b", reference="refs/a.wav").jobs[0].job_id,
+        build_render_plan(parse_script("## Abertura\n[serio intensidade=0.7]\nOla.\n[/serio]"), voice_id="voice-a", reference="refs/a.wav").jobs[0].job_id,
+        build_render_plan(base, voice_id="voice-a", reference="refs/b.wav").jobs[0].job_id,
+        build_render_plan(parse_script("## Abertura\n[calmo intensidade=0.8]\nOla.\n[/calmo]"), voice_id="voice-a", reference="refs/a.wav").jobs[0].job_id,
+        build_render_plan(parse_script("## Abertura\n[calmo intensidade=0.7]\nTchau.\n[/calmo]"), voice_id="voice-a", reference="refs/a.wav").jobs[0].job_id,
+    ]
+    assert identical_a == identical_b
+    assert all(job_id != identical_a for job_id in variants)
+
+
+def test_render_plan_order_changes_job_identity():
+    first = build_render_plan(parse_script("Um.\nDois."), voice_id="voice-a").jobs
+    swapped = build_render_plan(parse_script("Dois.\nUm."), voice_id="voice-a").jobs
+    assert first[0].job_id != swapped[1].job_id
+    assert first[1].job_id != swapped[0].job_id
+
+
+def test_render_plan_section_identity_ignores_unrelated_blank_lines():
+    compact = build_render_plan(parse_script("## Abertura\nOla."), voice_id="voice-a").jobs[0]
+    spaced = build_render_plan(parse_script("\n\n## Abertura\n\nOla."), voice_id="voice-a").jobs[0]
+    assert compact.section_id == spaced.section_id
+    assert compact.job_id == spaced.job_id
+
+
+def test_render_plan_rejects_absolute_reference():
+    with pytest.raises(TtsOrchestrationError, match="referencia relativa"):
+        build_render_plan(parse_script("Ola."), voice_id="voice-a", reference="C:/voices/ref.wav")
+
+
 def test_validator_resolves_style_alias_and_event(monkeypatch):
     from services import voice_profiles
 

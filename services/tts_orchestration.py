@@ -7,6 +7,7 @@ segmenta sem deixar instruções literais vazarem para a engine.
 import re
 import hashlib
 from dataclasses import dataclass, field
+from pathlib import PurePath, PureWindowsPath
 from typing import Dict, List, Optional
 
 
@@ -49,6 +50,8 @@ class ScriptAst:
 class RenderJob:
     job_id: str
     order: int
+    section_id: Optional[str]
+    section_title: Optional[str]
     voice_id: str
     style_id: Optional[str]
     reference: Optional[str]
@@ -68,15 +71,48 @@ class RenderPlan:
 
 def build_render_plan(ast: ScriptAst, *, voice_id: str, reference: Optional[str] = None) -> RenderPlan:
     jobs: List[RenderJob] = []
+    current_section_id: Optional[str] = None
+    current_section_title: Optional[str] = None
+    section_ordinal = 0
+
+    if reference and (PurePath(reference).is_absolute() or PureWindowsPath(reference).is_absolute()):
+        raise TtsOrchestrationError("RenderPlan exige referencia relativa controlada.")
+
+    def section_id_for(title: str, ordinal: int) -> str:
+        canonical = f"{ordinal}:{title.strip()}"
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
     def walk(nodes: List[ScriptNode], style: Optional[ScriptNode] = None) -> None:
+        nonlocal current_section_id, current_section_title, section_ordinal
         for node in nodes:
-            if node.kind == "style": walk(node.children, node)
+            if node.kind == "subtitle":
+                section_ordinal += 1
+                current_section_title = node.text
+                current_section_id = section_id_for(node.text, section_ordinal)
+            elif node.kind == "style":
+                walk(node.children, node)
             elif node.kind == "text":
                 normalized = normalize_pt_br(node.text)
                 order = len(jobs)
-                key = f"{order}:{voice_id}:{style.text if style else ''}:{node.text}"
-                jobs.append(RenderJob(hashlib.sha256(key.encode()).hexdigest()[:16], order, voice_id,
-                    style.text if style else None, reference, dict(style.parameters) if style else {}, node.text, normalized))
+                style_id = style.text if style else None
+                parameters = dict(style.parameters) if style else {}
+                semantic_key = repr((
+                    current_section_id, current_section_title, order, voice_id, style_id,
+                    reference, sorted(parameters.items()), node.text, normalized,
+                ))
+                jobs.append(RenderJob(
+                    job_id=hashlib.sha256(semantic_key.encode("utf-8")).hexdigest()[:16],
+                    order=order,
+                    section_id=current_section_id,
+                    section_title=current_section_title,
+                    voice_id=voice_id,
+                    style_id=style_id,
+                    reference=reference,
+                    parameters=parameters,
+                    original_text=node.text,
+                    normalized_text=normalized,
+                ))
+
     walk(ast.nodes)
     return RenderPlan(version=1, jobs=jobs)
 
