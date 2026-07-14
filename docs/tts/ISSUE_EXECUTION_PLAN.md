@@ -34,7 +34,7 @@ RenderPlan com engines, geração, UI ou montagem de áudio.
   ↓
 #24 / T5.1 — ready, reaberta
   ↓
-#25 / T5.2 — blocked-technical
+#25 / T5.2 - done
 ```
 
 ## Matriz tarefa → issue
@@ -44,8 +44,8 @@ RenderPlan com engines, geração, UI ou montagem de áudio.
 | T4.1 | #21 | Done | gramática e revisão documental | preservar contrato |
 | T4.2 | #22 | Done | testes focais e suíte registrados | preservar AST |
 | T4.3 | #23 | Done | validação pura e suíte registradas | preservar fronteira |
-| T5.1 | #24 | Partial / Ready | manifesto básico e `260 passed`; aceite de seção ausente | corrigir e provar aceite |
-| T5.2 | #25 | Blocked-technical | contrato aprofundado, sem implementação | aguardar #24 |
+| T5.1 | #24 | Done | secoes, identidade semantica e serializacao comprovadas em `31bd3ca0` | preservar contrato |
+| T5.2 | #25 | Done | resolucao por speaker/voz/estilo/referencia/parametros em `a8ffa8d7`; `270 passed` | fechar Gate C |
 
 ## Critério de entrada de uma issue
 
@@ -71,7 +71,7 @@ Seguir `docs/agents/AUTONOMY_AND_GIT.md`. Exigir:
 
 ## Próxima execução única
 
-### #24 — concluir T5.1
+### Proxima fatia - T6.1
 
 Escopo:
 

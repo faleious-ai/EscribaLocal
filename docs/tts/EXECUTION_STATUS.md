@@ -54,7 +54,7 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 | T4.2 | #22 | Parser e AST | verified | nós de estilo, pausa, evento, subtítulo e erros com posição. | Nenhuma nesta tarefa. | T4.1 |
 | T4.3 | #23 | Validação contra biblioteca | verified | validação pura de estilo, alias, speaker, evento e compatibilidade. | Sem RenderPlan por contrato. | T4.2 |
 | T5.1 | #24 | RenderPlan persist?vel | verified | jobs ordenados e serializ?veis preservam se??o, ordem, voz, estilo, refer?ncia relativa, par?metros e textos original/normalizado; identidade determin?stica cobre toda a sem?ntica de T5.1. | `31bd3ca0`; `19 passed` focais; `265 passed, 4 warnings` na su?te completa; `git diff --check` limpo. #24 pronta para fechamento e #25 pode ser retriada. | T4.3 |
-| T5.2 | #25 | Falantes reais e virtuais | ready | issue delimitada e contrato aprofundado; depend?ncia t?cnica de T5.1 resolvida. | Executar resolu??o por segmento `speaker ? voice ? style ? reference ? parameters`, sem engines, UI ou ?udio. | T5.1 |
+| T5.2 | #25 | Falantes reais e virtuais | verified | cada job registra speaker logico, voz, estilo canonico, referencia relativa e parametros tipados; aliases resolvem por voz; estilos prontos usam midia propria; falhas sao explicitas. | `a8ffa8d7`; `24 passed` focais; `270 passed, 4 warnings` na suite completa; `git diff --check` limpo. | T5.1 |
 
 ## Bloqueios independentes
 
@@ -76,3 +76,10 @@ Evid?ncia: `19 passed` em `tests/test_tts_orchestration.py`; `265 passed, 4 warn
 2. retriar #25 como `ready-for-agent`;
 3. executar exclusivamente #25/T5.2 conforme `RENDERPLAN_CONTRACT.md`;
 4. n?o alterar engines, endpoints, UI, AudioAssembler ou Realtime.
+
+## Proximo passo permitido
+
+1. fechar #25 com mapa aceite -> evidencia;
+2. fechar o epic #26 se o Gate C estiver integralmente comprovado;
+3. formalizar a proxima fatia da Fase C, T6.1, antes de alterar normalizacao;
+4. manter T5.3 fora da fila imediata por ser P2 e relacionado ao modo nativo VibeVoice.

@@ -13,15 +13,15 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 - #21 / T4.1 — gramática formal;
 - #22 / T4.2 — parser e AST;
 - #23 / T4.3 — validação contra biblioteca;
-- #24 / T5.1 ? RenderPlan persist?vel conclu?do em `31bd3ca0`, com se??es e identidade sem?ntica comprovadas.
+- #24 / T5.1 - RenderPlan persistivel concluido em `31bd3ca0`, com secoes e identidade semantica comprovadas;
+- #25 / T5.2 - falantes reais e virtuais concluidos em `a8ffa8d7`, com resolucao por segmento e falhas sem fallback.
 
 ### Ready
 
-- #25 / T5.2 ? depend?ncia de T5.1 resolvida; pronta para resolu??o de falantes reais e virtuais por segmento.
 
 ### Blocked-technical
 
-- nenhuma no Gate C imediato.
+- nenhuma; Gate C pronto para fechamento.
 
 ### Blocked-human
 
@@ -33,12 +33,12 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 
 ## Próxima issue executável
 
-#25 ? resolver, por segmento, speaker l?gico, voz, estilo can?nico, refer?ncia e par?metros, sem gerar ?udio.
+Formalizar T6.1 - extrair o normalizador PT-BR modular - como proxima issue executavel da Fase C.
 
 ## DAG imediato
 
 ```text
-#21 done ? #22 done ? #23 done ? #24 done ? #25 ready
+#21 done -> #22 done -> #23 done -> #24 done -> #25 done -> Gate C done
 ```
 
 ## Limites da próxima execução
@@ -51,7 +51,7 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 
 ## Critério de parada da próxima execução
 
-Parar quando #25 cumprir integralmente o contrato revisado, com testes focais e su?te relevante registrados, ledger atualizado e issue fechada; ent?o reavaliar a fila do Gate C.
+Parar a proxima unidade quando T6.1 estiver delimitada, implementada, testada e persistida; nao iniciar T6.2 na mesma issue.
 
 ## Regra de continuidade
 
