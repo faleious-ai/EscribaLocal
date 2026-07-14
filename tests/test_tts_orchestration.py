@@ -201,3 +201,145 @@ def test_tts_generation_does_not_pass_tags_to_engine(monkeypatch):
     assert result["wav_bytes"] == b"RIFF0000WAVEfake"
     assert "[" not in captured["text"]
     assert "senhor Joao chegou" in captured["text"]
+
+
+def test_render_plan_resolves_two_speakers_two_voices_and_styles(monkeypatch, tmp_path):
+    from services import voice_profiles
+
+    profiles = {
+        "voice-a": {
+            "reference": {"path": "reference.wav"},
+            "styles": {"items": [{
+                "style_id": "acolhedor", "aliases": ["calmo"], "active": True,
+                "parameters": {"intensidade": 0.4, "natural": True},
+                "engine_compatibility": {"tts_1_5b": "supported"},
+                "reference": {"status": "missing"},
+            }]},
+        },
+        "voice-b": {
+            "reference": {"path": "reference.wav"},
+            "styles": {"items": [{
+                "style_id": "serio", "aliases": ["calmo"], "active": True,
+                "parameters": {"ritmo": "lento"},
+                "engine_compatibility": {"tts_1_5b": "supported"},
+                "reference": {"status": "missing"},
+            }]},
+        },
+    }
+    monkeypatch.setattr(voice_profiles, "get_voice", lambda voice: profiles[voice])
+
+    ast = parse_script(
+        "[calmo falante=ana intensidade=0.8 ativo=false]\nOi.\n[/calmo]\n"
+        "[calmo falante=carlos]\nOla.\n[/calmo]"
+    )
+    plan = build_render_plan(ast, voice_id="voice-a", speaker_voices={"ana": "voice-a", "carlos": "voice-b"})
+
+    assert [(job.speaker_id, job.voice_id, job.style_id) for job in plan.jobs] == [
+        ("ana", "voice-a", "acolhedor"),
+        ("carlos", "voice-b", "serio"),
+    ]
+    assert plan.jobs[0].parameters == {"intensidade": 0.8, "natural": True, "ativo": False}
+    assert "falante" not in plan.jobs[0].parameters
+    assert plan.jobs[0].reference == "reference.wav"
+    assert plan.manifest()["jobs"][1]["speaker_id"] == "carlos"
+
+
+def test_render_plan_allows_shared_voice_and_style_switch(monkeypatch):
+    from services import voice_profiles
+
+    profile = {
+        "reference": {"path": "reference.wav"},
+        "styles": {"items": [
+            {"style_id": "acolhedor", "aliases": [], "active": True, "parameters": {}, "reference": {"status": "missing"}},
+            {"style_id": "serio", "aliases": [], "active": True, "parameters": {}, "reference": {"status": "missing"}},
+        ]},
+    }
+    monkeypatch.setattr(voice_profiles, "get_voice", lambda _voice: profile)
+    ast = parse_script(
+        "[acolhedor falante=ana]\nOi.\n[/acolhedor]\n"
+        "[serio falante=carlos]\nOla.\n[/serio]"
+    )
+    plan = build_render_plan(ast, voice_id="voice-a", speaker_voices={"ana": "voice-a", "carlos": "voice-a"})
+
+    assert [job.voice_id for job in plan.jobs] == ["voice-a", "voice-a"]
+    assert [job.speaker_id for job in plan.jobs] == ["ana", "carlos"]
+    assert [job.style_id for job in plan.jobs] == ["acolhedor", "serio"]
+    assert plan.jobs[0].job_id != plan.jobs[1].job_id
+
+
+def test_render_plan_prefers_ready_style_reference(monkeypatch, tmp_path):
+    from services import voice_profiles
+
+    media = tmp_path / "reference.wav"
+    media.write_bytes(b"wav")
+    profile = {
+        "reference": {"path": "reference.wav"},
+        "styles": {"items": [{
+            "style_id": "acolhedor", "aliases": [], "active": True, "parameters": {},
+            "reference": {"status": "ready", "path": "reference.wav"},
+        }]},
+    }
+    monkeypatch.setattr(voice_profiles, "get_voice", lambda _voice: profile)
+    monkeypatch.setattr(voice_profiles, "style_reference_path", lambda _voice, _style: media)
+
+    job = build_render_plan(
+        parse_script("[acolhedor falante=ana]\nOi.\n[/acolhedor]"),
+        voice_id="voice-a",
+        speaker_voices={"ana": "voice-a"},
+    ).jobs[0]
+    assert job.reference == "styles/acolhedor/reference.wav"
+
+
+def test_render_plan_fails_without_mapping_voice_style_or_media(monkeypatch, tmp_path):
+    from services import voice_profiles
+
+    with pytest.raises(TtsOrchestrationError, match="Speaker sem voz"):
+        build_render_plan(
+            parse_script("[calmo falante=ana]\nOi.\n[/calmo]"),
+            voice_id="voice-a",
+            speaker_voices={},
+        )
+
+    monkeypatch.setattr(voice_profiles, "get_voice", lambda voice: (_ for _ in ()).throw(KeyError(voice)))
+    with pytest.raises(TtsOrchestrationError, match="Voz inexistente"):
+        build_render_plan(
+            parse_script("[calmo falante=ana]\nOi.\n[/calmo]"),
+            voice_id="voice-a",
+            speaker_voices={"ana": "missing"},
+        )
+
+    profile = {
+        "reference": {"path": "reference.wav"},
+        "styles": {"items": [{
+            "style_id": "calmo", "active": True, "parameters": {},
+            "reference": {"status": "ready", "path": "reference.wav"},
+        }]},
+    }
+    monkeypatch.setattr(voice_profiles, "get_voice", lambda _voice: profile)
+    monkeypatch.setattr(voice_profiles, "style_reference_path", lambda _voice, _style: tmp_path / "missing.wav")
+    with pytest.raises(TtsOrchestrationError, match="ausente"):
+        build_render_plan(
+            parse_script("[calmo falante=ana]\nOi.\n[/calmo]"),
+            voice_id="voice-a",
+            speaker_voices={"ana": "voice-a"},
+        )
+
+
+def test_render_plan_rejects_inactive_and_incompatible_styles(monkeypatch):
+    from services import voice_profiles
+
+    profiles = iter([
+        {"reference": {"path": "reference.wav"}, "styles": {"items": [{"style_id": "calmo", "active": False}]}},
+        {"reference": {"path": "reference.wav"}, "styles": {"items": [{
+            "style_id": "calmo", "active": True,
+            "engine_compatibility": {"tts_1_5b": "blocked"},
+            "reference": {"status": "missing"},
+        }]}},
+    ])
+    monkeypatch.setattr(voice_profiles, "get_voice", lambda _voice: next(profiles))
+    ast = parse_script("[calmo falante=ana]\nOi.\n[/calmo]")
+
+    with pytest.raises(TtsOrchestrationError, match="inexistente ou inativo"):
+        build_render_plan(ast, voice_id="voice-a", speaker_voices={"ana": "voice-a"})
+    with pytest.raises(TtsOrchestrationError, match="incompat"):
+        build_render_plan(ast, voice_id="voice-a", speaker_voices={"ana": "voice-a"})

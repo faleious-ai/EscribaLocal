@@ -51,11 +51,12 @@ class RenderJob:
     job_id: str
     order: int
     section_id: Optional[str]
+    speaker_id: Optional[str]
     section_title: Optional[str]
     voice_id: str
     style_id: Optional[str]
     reference: Optional[str]
-    parameters: Dict[str, str]
+    parameters: Dict[str, object]
     original_text: str
     normalized_text: str
 
@@ -69,7 +70,29 @@ class RenderPlan:
         return {"version": self.version, "jobs": [job.__dict__ for job in self.jobs]}
 
 
-def build_render_plan(ast: ScriptAst, *, voice_id: str, reference: Optional[str] = None) -> RenderPlan:
+def _typed_parameter(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    lowered = value.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    if re.fullmatch(r"-?\d+", value):
+        return int(value)
+    if re.fullmatch(r"-?\d+\.\d+", value):
+        return float(value)
+    return value
+
+
+def build_render_plan(
+    ast: ScriptAst,
+    *,
+    voice_id: str,
+    reference: Optional[str] = None,
+    speaker_voices: Optional[Dict[str, str]] = None,
+    engine_key: str = "tts_1_5b",
+) -> RenderPlan:
     jobs: List[RenderJob] = []
     current_section_id: Optional[str] = None
     current_section_title: Optional[str] = None
@@ -81,6 +104,70 @@ def build_render_plan(ast: ScriptAst, *, voice_id: str, reference: Optional[str]
     def section_id_for(title: str, ordinal: int) -> str:
         canonical = f"{ordinal}:{title.strip()}"
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+    def resolve_segment(style: Optional[ScriptNode]) -> tuple[Optional[str], str, Optional[str], Optional[str], Dict[str, object]]:
+        from services import voice_profiles
+
+        inline = dict(style.parameters) if style else {}
+        speaker_id = inline.pop("falante", None)
+        resolved_voice_id = voice_id
+        if speaker_id:
+            resolved_voice_id = (speaker_voices or {}).get(speaker_id) or ""
+            if not resolved_voice_id:
+                raise TtsOrchestrationError(f"Speaker sem voz: {speaker_id}.")
+
+        if not style and not speaker_id:
+            return None, resolved_voice_id, None, reference, {}
+        if style and not speaker_id and reference is not None and speaker_voices is None:
+            legacy_parameters = {key: _typed_parameter(value) for key, value in inline.items()}
+            return None, resolved_voice_id, style.text, reference, legacy_parameters
+
+        try:
+            profile = voice_profiles.get_voice(resolved_voice_id)
+        except Exception as exc:
+            raise TtsOrchestrationError(f"Voz inexistente: {resolved_voice_id}.") from exc
+
+        neutral = reference or ((profile.get("engines") or {}).get(engine_key) or {}).get("reference", {}).get("path")
+        neutral = neutral or (profile.get("reference") or {}).get("path")
+        if neutral and (PurePath(neutral).is_absolute() or PureWindowsPath(neutral).is_absolute()):
+            raise TtsOrchestrationError("RenderPlan exige referencia relativa controlada.")
+
+        if not style:
+            return speaker_id, resolved_voice_id, None, neutral, {}
+
+        items = (profile.get("styles") or {}).get("items") or []
+        resolved_style = None
+        for item in items:
+            if style.text == item.get("style_id") or style.text in (item.get("aliases") or []):
+                resolved_style = item
+                break
+        if not resolved_style or not resolved_style.get("active", True):
+            raise TtsOrchestrationError(f"Estilo inexistente ou inativo: {style.text}.")
+        compatibility = (resolved_style.get("engine_compatibility") or {}).get(engine_key)
+        if compatibility in {"unsupported", "blocked"}:
+            raise TtsOrchestrationError(f"Estilo incompat?vel com {engine_key}: {style.text}.")
+
+        style_ref = resolved_style.get("reference") or {}
+        resolved_reference = neutral
+        if style_ref.get("status") == "ready":
+            path = style_ref.get("path")
+            if not path:
+                raise TtsOrchestrationError(f"Refer?ncia pronta inconsistente: {style.text}.")
+            media_path = voice_profiles.style_reference_path(resolved_voice_id, resolved_style["style_id"])
+            if not media_path.exists():
+                raise TtsOrchestrationError(f"M?dia de refer?ncia ausente: {style.text}.")
+            resolved_reference = f"styles/{resolved_style['style_id']}/{path}"
+        elif style_ref.get("status") not in {None, "missing", "pending"}:
+            raise TtsOrchestrationError(f"Refer?ncia de estilo inv?lida: {style.text}.")
+
+        if not resolved_reference:
+            raise TtsOrchestrationError(f"Refer?ncia neutra ausente para voz: {resolved_voice_id}.")
+        if PurePath(resolved_reference).is_absolute() or PureWindowsPath(resolved_reference).is_absolute():
+            raise TtsOrchestrationError("RenderPlan exige referencia relativa controlada.")
+
+        parameters = {key: _typed_parameter(value) for key, value in (resolved_style.get("parameters") or {}).items()}
+        parameters.update({key: _typed_parameter(value) for key, value in inline.items()})
+        return speaker_id, resolved_voice_id, resolved_style["style_id"], resolved_reference, parameters
 
     def walk(nodes: List[ScriptNode], style: Optional[ScriptNode] = None) -> None:
         nonlocal current_section_id, current_section_title, section_ordinal
@@ -94,20 +181,20 @@ def build_render_plan(ast: ScriptAst, *, voice_id: str, reference: Optional[str]
             elif node.kind == "text":
                 normalized = normalize_pt_br(node.text)
                 order = len(jobs)
-                style_id = style.text if style else None
-                parameters = dict(style.parameters) if style else {}
+                speaker_id, resolved_voice_id, style_id, resolved_reference, parameters = resolve_segment(style)
                 semantic_key = repr((
-                    current_section_id, current_section_title, order, voice_id, style_id,
-                    reference, sorted(parameters.items()), node.text, normalized,
+                    current_section_id, current_section_title, order, speaker_id, resolved_voice_id,
+                    style_id, resolved_reference, sorted(parameters.items()), node.text, normalized,
                 ))
                 jobs.append(RenderJob(
                     job_id=hashlib.sha256(semantic_key.encode("utf-8")).hexdigest()[:16],
                     order=order,
                     section_id=current_section_id,
+                    speaker_id=speaker_id,
                     section_title=current_section_title,
-                    voice_id=voice_id,
+                    voice_id=resolved_voice_id,
                     style_id=style_id,
-                    reference=reference,
+                    reference=resolved_reference,
                     parameters=parameters,
                     original_text=node.text,
                     normalized_text=normalized,
