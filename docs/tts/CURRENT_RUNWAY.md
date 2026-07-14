@@ -14,7 +14,8 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 - #22 / T4.2 — parser e AST;
 - #23 / T4.3 — validação contra biblioteca;
 - #24 / T5.1 - RenderPlan persistivel concluido em `31bd3ca0`, com secoes e identidade semantica comprovadas;
-- #25 / T5.2 - falantes reais e virtuais concluidos em `a8ffa8d7`, com resolucao por segmento e falhas sem fallback.
+- #25 / T5.2 - falantes reais e virtuais concluidos em `a8ffa8d7`, com resolucao por segmento e falhas sem fallback;
+- #30 / T6.1 - normalizador PT-BR modular concluido em `d02fc83e`, com perfis explicitos e comportamento preservado.
 
 ### Ready
 
@@ -33,12 +34,12 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 
 ## Próxima issue executável
 
-Formalizar T6.1 - extrair o normalizador PT-BR modular - como proxima issue executavel da Fase C.
+Formalizar T6.2 - ampliar cobertura de normalizacao PT-BR - como proxima issue executavel.
 
 ## DAG imediato
 
 ```text
-#21 done -> #22 done -> #23 done -> #24 done -> #25 done -> Gate C done
+#21 -> #25 done -> Gate C done -> #30/T6.1 done -> T6.2 next
 ```
 
 ## Limites da próxima execução
@@ -51,7 +52,7 @@ Formalizar T6.1 - extrair o normalizador PT-BR modular - como proxima issue exec
 
 ## Critério de parada da próxima execução
 
-Parar a proxima unidade quando T6.1 estiver delimitada, implementada, testada e persistida; nao iniciar T6.2 na mesma issue.
+Parar a proxima unidade quando T6.2 estiver delimitada, implementada, testada e persistida; nao iniciar T6.3 na mesma issue.
 
 ## Regra de continuidade
 
