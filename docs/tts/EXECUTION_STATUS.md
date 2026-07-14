@@ -53,8 +53,8 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 | T4.1 | #21 | Gramática formal | verified | EBNF, exemplos e fronteiras. | Nenhuma nesta tarefa. | T3.3 |
 | T4.2 | #22 | Parser e AST | verified | nós de estilo, pausa, evento, subtítulo e erros com posição. | Nenhuma nesta tarefa. | T4.1 |
 | T4.3 | #23 | Validação contra biblioteca | verified | validação pura de estilo, alias, speaker, evento e compatibilidade. | Sem RenderPlan por contrato. | T4.2 |
-| T5.1 | #24 | RenderPlan persistível | implemented | jobs ordenados, serialização, voz, estilo, referência, parâmetros e textos. | **Issue reaberta:** seções não são preservadas; ID não cobre toda a semântica; falta mapa aceite→evidência. Concluir sem avançar T5.2. | T4.3 |
-| T5.2 | #25 | Falantes reais e virtuais | blocked | issue existente e contrato aprofundado. | Aguardar #24; depois resolver por segmento `speaker → voice → style → reference → parameters`. | T5.1 |
+| T5.1 | #24 | RenderPlan persist?vel | verified | jobs ordenados e serializ?veis preservam se??o, ordem, voz, estilo, refer?ncia relativa, par?metros e textos original/normalizado; identidade determin?stica cobre toda a sem?ntica de T5.1. | `31bd3ca0`; `19 passed` focais; `265 passed, 4 warnings` na su?te completa; `git diff --check` limpo. #24 pronta para fechamento e #25 pode ser retriada. | T4.3 |
+| T5.2 | #25 | Falantes reais e virtuais | ready | issue delimitada e contrato aprofundado; depend?ncia t?cnica de T5.1 resolvida. | Executar resolu??o por segmento `speaker ? voice ? style ? reference ? parameters`, sem engines, UI ou ?udio. | T5.1 |
 
 ## Bloqueios independentes
 
@@ -63,20 +63,16 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 | #8 | HITL — Realtime 0.5B | blocked | Bloqueia somente a frente nativa do Realtime, não Gate C. |
 | #12 | Validação final | blocked | Depende de gates posteriores e de evidência real em hardware. |
 
-## Reconciliação de T5.1
 
-A issue #24 foi fechada com registro de `260 passed`, mas o critério explícito de
-preservação de seções não possui implementação/evidência no manifesto atual. O
-estado foi rebaixado de `verified` para `implemented`; o trabalho entregue não é
-apagado. A issue está reaberta e delimitada para concluir o aceite antes de #25.
+## Reconcilia??o de T5.1
 
-## Próximo passo permitido
+T5.1 foi conclu?da no commit `31bd3ca0`. O manifesto agora preserva `section_id` e `section_title`, mant?m ordem entre e dentro das se??es, rejeita refer?ncias absolutas e deriva `job_id` de se??o, ordem, voz, estilo, refer?ncia, par?metros e textos original/normalizado.
 
-1. concluir exclusivamente #24/T5.1 conforme `RENDERPLAN_CONTRACT.md`;
-2. registrar aceite → evidência;
-3. fechar #24 somente após testes;
-4. retriar #25 como `ready-for-agent`;
-5. atualizar este ledger e `CURRENT_RUNWAY.md`.
+Evid?ncia: `19 passed` em `tests/test_tts_orchestration.py`; `265 passed, 4 warnings` na su?te completa; `git diff --check` sem erros.
 
-Não iniciar código de #25, engines, UI, AudioAssembler, montagem ou Realtime antes
-dessa sequência.
+## Pr?ximo passo permitido
+
+1. fechar #24 com mapa aceite ? evid?ncia;
+2. retriar #25 como `ready-for-agent`;
+3. executar exclusivamente #25/T5.2 conforme `RENDERPLAN_CONTRACT.md`;
+4. n?o alterar engines, endpoints, UI, AudioAssembler ou Realtime.

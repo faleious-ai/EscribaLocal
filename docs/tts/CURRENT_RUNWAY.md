@@ -12,15 +12,16 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 
 - #21 / T4.1 — gramática formal;
 - #22 / T4.2 — parser e AST;
-- #23 / T4.3 — validação contra biblioteca.
+- #23 / T4.3 — validação contra biblioteca;
+- #24 / T5.1 ? RenderPlan persist?vel conclu?do em `31bd3ca0`, com se??es e identidade sem?ntica comprovadas.
 
 ### Ready
 
-- #24 / T5.1 — reaberta e delimitada para concluir o aceite incompleto do RenderPlan persistível.
+- #25 / T5.2 ? depend?ncia de T5.1 resolvida; pronta para resolu??o de falantes reais e virtuais por segmento.
 
 ### Blocked-technical
 
-- #25 / T5.2 — depende da conclusão real de #24; label `ready-for-agent` removida.
+- nenhuma no Gate C imediato.
 
 ### Blocked-human
 
@@ -32,12 +33,12 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 
 ## Próxima issue executável
 
-#24 — preservar seções no manifesto, fortalecer identidade determinística e produzir evidência explícita para cada critério de aceite.
+#25 ? resolver, por segmento, speaker l?gico, voz, estilo can?nico, refer?ncia e par?metros, sem gerar ?udio.
 
 ## DAG imediato
 
 ```text
-#21 done → #22 done → #23 done → #24 ready → #25 blocked
+#21 done ? #22 done ? #23 done ? #24 done ? #25 ready
 ```
 
 ## Limites da próxima execução
@@ -50,7 +51,7 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 
 ## Critério de parada da próxima execução
 
-Parar quando #24 cumprir integralmente o contrato revisado, com testes focais e suíte relevante registrados, ledger atualizado, issue fechada e #25 retriada.
+Parar quando #25 cumprir integralmente o contrato revisado, com testes focais e su?te relevante registrados, ledger atualizado e issue fechada; ent?o reavaliar a fila do Gate C.
 
 ## Regra de continuidade
 
