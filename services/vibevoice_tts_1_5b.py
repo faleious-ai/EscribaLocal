@@ -695,6 +695,8 @@ def generate_voice_1_5b_with_metadata(
     segment_references: Optional[List[str]] = None,
     segment_voice_ids: Optional[List[str]] = None,
     segment_speaker_ids: Optional[List[str]] = None,
+    cancel_event: Any = None,
+    unload_after: bool = False,
 ) -> Dict[str, Any]:
     """Geração TTS 1.5B.
 
@@ -748,19 +750,24 @@ def generate_voice_1_5b_with_metadata(
         resolved_segment_speaker_ids = segment_speaker_ids or [
             segment.speaker_id for segment in tts_plan.segments if segment.text
         ]
-        return chatterbox_engine.generate_voice_chatterbox(
-            text=text,
-            voice_id=voice_id,
-            speaker_voices=speaker_voices,
-            speaker_id=speaker_id,
-            speed=speed,
-            segment_texts=segment_texts,
-            parameters=chatterbox_parameters,
-            segment_parameters=segment_parameters,
-            segment_references=segment_references,
-            segment_voice_ids=resolved_segment_voice_ids,
-            segment_speaker_ids=resolved_segment_speaker_ids,
-        )
+        try:
+            return chatterbox_engine.generate_voice_chatterbox(
+                text=text,
+                voice_id=voice_id,
+                speaker_voices=speaker_voices,
+                speaker_id=speaker_id,
+                speed=speed,
+                segment_texts=segment_texts,
+                parameters=chatterbox_parameters,
+                segment_parameters=segment_parameters,
+                segment_references=segment_references,
+                segment_voice_ids=resolved_segment_voice_ids,
+                segment_speaker_ids=resolved_segment_speaker_ids,
+                cancel_event=cancel_event,
+            )
+        finally:
+            if unload_after:
+                chatterbox_engine.unload()
 
     if device != "auto":
         device_preference = device

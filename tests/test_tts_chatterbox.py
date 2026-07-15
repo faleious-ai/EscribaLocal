@@ -2,7 +2,7 @@ import pytest
 from pathlib import Path
 from services import voice_profiles
 from services.vibevoice_tts_1_5b import VoiceUnavailableError, generate_voice_1_5b_with_metadata
-from services.chatterbox_adapter import ChatterboxUnavailableError, chatterbox_engine
+from services.chatterbox_adapter import ChatterboxCancelledError, ChatterboxUnavailableError, chatterbox_engine
 from services.resource_arbiter import arbiter
 
 
@@ -449,3 +449,70 @@ def test_chatterbox_orchestrates_distinct_speaker_voices_by_segment(monkeypatch,
     assert wrapped["voices_by_segment"] == [voice_a, voice_b]
     assert wrapped["speakers_by_segment"] == ["speaker_1", "speaker_2"]
     chatterbox_engine.unload()
+
+
+def test_chatterbox_cancellation_stops_before_next_segment(monkeypatch, tmp_path):
+    import importlib.util
+    import sys
+    import threading
+    import types
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object() if name == "chatterbox" else None)
+    fake_chatterbox = types.ModuleType("chatterbox")
+    fake_mtl = types.ModuleType("chatterbox.mtl_tts")
+    cancel_event = threading.Event()
+
+    class FakeTTS:
+        sr = 24000
+        calls = []
+
+        @classmethod
+        def from_pretrained(cls, repo_id, device):
+            return cls()
+
+        def generate(self, text, audio_prompt_path, **kwargs):
+            self.calls.append(text)
+            cancel_event.set()
+            return [0.1, -0.1] * 1200
+
+    fake_mtl.ChatterboxMultilingualTTS = FakeTTS
+    monkeypatch.setitem(sys.modules, "chatterbox", fake_chatterbox)
+    monkeypatch.setitem(sys.modules, "chatterbox.mtl_tts", fake_mtl)
+    chatterbox_engine.unload()
+
+    voice_id = "11111111-2222-3333-4444-555555555555"
+    ref_wav = tmp_path / "reference.wav"
+    ref_wav.write_bytes(b"0" * 44)
+    monkeypatch.setattr(voice_profiles, "resolve_voice_id", lambda vid: voice_id)
+    monkeypatch.setattr(voice_profiles, "get_voice", lambda vid: {"id": vid})
+    monkeypatch.setattr(voice_profiles, "reference_path", lambda vid: ref_wav)
+
+    with pytest.raises(ChatterboxCancelledError, match="cancelada"):
+        chatterbox_engine.generate_voice_chatterbox(
+            text="Primeiro Segundo",
+            voice_id=voice_id,
+            segment_texts=["Primeiro", "Segundo"],
+            cancel_event=cancel_event,
+        )
+    assert FakeTTS.calls == ["Primeiro"]
+    chatterbox_engine.unload()
+
+
+def test_chatterbox_wrapper_unloads_after_requested_job(monkeypatch):
+    unload_calls = []
+    monkeypatch.setattr(
+        chatterbox_engine,
+        "generate_voice_chatterbox",
+        lambda **kwargs: {"wav_bytes": b"RIFF", "engine_key": "chatterbox-tts-pt-br"},
+    )
+    monkeypatch.setattr(chatterbox_engine, "unload", lambda: unload_calls.append(True))
+
+    result = generate_voice_1_5b_with_metadata(
+        text="Olá",
+        model_key="chatterbox-tts-pt-br",
+        voice_id="voice-a",
+        unload_after=True,
+    )
+
+    assert result["wav_bytes"] == b"RIFF"
+    assert unload_calls == [True]

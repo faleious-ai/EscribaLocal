@@ -25,6 +25,10 @@ class ChatterboxUnavailableError(RuntimeError):
     pass
 
 
+class ChatterboxCancelledError(RuntimeError):
+    """Sinaliza cancelamento cooperativo entre segmentos do Chatterbox."""
+
+
 def _punc_norm(text: str) -> str:
     if len(text) == 0:
         return "You need to add some text for me to talk."
@@ -136,8 +140,11 @@ class ChatterboxAdapter:
         if self.model is not None:
             logger.info("Chatterbox: liberando modelo da memoria...")
             self.model = None
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+        import gc
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def est_vram_mb(self) -> float:
         return 1500.0
@@ -350,10 +357,16 @@ class ChatterboxAdapter:
         segment_references: Optional[Sequence[str]] = None,
         segment_voice_ids: Optional[Sequence[str]] = None,
         segment_speaker_ids: Optional[Sequence[str]] = None,
+        cancel_event: Optional[Any] = None,
     ) -> Dict[str, Any]:
         from services import voice_profiles
         from services.vibevoice_tts_1_5b import VoiceUnavailableError, _wav_bytes_from_array
 
+        def ensure_not_cancelled() -> None:
+            if cancel_event is not None and cancel_event.is_set():
+                raise ChatterboxCancelledError("Geração Chatterbox cancelada antes do próximo segmento.")
+
+        ensure_not_cancelled()
         resolved_voice_id = None
         if speaker_voices and speaker_id:
             import re
@@ -414,6 +427,8 @@ class ChatterboxAdapter:
 
         sample_rate = getattr(self.model, "sr", 24000)
         chunk_texts = self._chunk_texts_for_generation(text=text, segment_texts=segment_texts)
+
+        ensure_not_cancelled()
         base_segments = [
             segment.strip()
             for segment in (segment_texts or [text])
@@ -506,6 +521,7 @@ class ChatterboxAdapter:
         silence = np.zeros(int(sample_rate * 0.18), dtype=np.float32)
 
         for index, chunk_text in enumerate(chunk_texts):
+            ensure_not_cancelled()
             generation_kwargs = dict(parameter_sets[index]["used"])
             audio_tensor = self.model.generate(
                 text=chunk_text,

@@ -818,6 +818,7 @@ async def tts_generate(
                     seed=seed,
                     failure_policy=failure_policy,
                     device=device,
+                    unload_after=tts_model == "chatterbox-tts-pt-br",
                 )
             )
         try:
@@ -876,6 +877,7 @@ async def tts_generate(
     except HTTPException:
         raise
     except Exception as e:
+        from services.chatterbox_adapter import ChatterboxCancelledError
         from services.vibevoice_tts_1_5b import LargeModelUnavailableError, VoiceUnavailableError
         from services.tts_orchestration import TtsOrchestrationError
         if isinstance(e, RealtimeUnavailableError):
@@ -884,7 +886,7 @@ async def tts_generate(
             raise HTTPException(status_code=503, detail=e.to_payload())
         logger.error(f"Erro na geração de áudio TTS: {e}")
         record_exception_event("tts_generate_error", e, requested_model=tts_model)
-        status = 422 if isinstance(
+        status = 409 if isinstance(e, ChatterboxCancelledError) else 422 if isinstance(
             e,
             (LargeModelUnavailableError, TtsOrchestrationError, VoiceUnavailableError),
         ) else 500
