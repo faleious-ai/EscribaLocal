@@ -64,6 +64,7 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 | T8.2 | #36 | Referência Chatterbox por segmento | verified | referências individuais encaminhadas por chunk, erro explícito para ausência e `references_by_segment` no metadata; compatibilidade neutra preservada. | `21 passed` focais; `295 passed, 4 warnings` na suíte completa; `git diff --check` limpo. | T8.1 |
 | T8.3 | #37 | Multi-voz Chatterbox orquestrado | verified | cada segmento resolve speaker/voz/referência de forma independente, gera chamadas separadas, rejeita mapa ausente e retorna `speakers_by_segment`, `voices_by_segment` e `references_by_segment`. | `35 passed` focais; `296 passed, 4 warnings` na suíte completa; `git diff --check` limpo. | T8.2 |
 | T8.4 | #38 | Cancelamento e unload Chatterbox | verified | token cooperativo verificado antes do primeiro e de cada segmento; cancelamento impede chamadas seguintes; wrapper propaga token e descarrega modelo/VRAM no pós-job solicitado. | `16 passed` focais; `298 passed, 4 warnings` na suíte completa; `git diff --check` limpo. | T8.3 |
+| T8.5 | #39 | QA PT-BR com amostras reais | blocked | runner reproduzível, cinco WAVs reais, manifesto estrutural e round-trip auxiliar registrados em `docs/tts/T8.5_QA_REPORT.md`. | **Bloqueio humano:** falta escuta e notas de naturalidade, prosódia, pronúncia e artefatos no manifesto local. | T8.4 |
 
 ## Bloqueios independentes
 

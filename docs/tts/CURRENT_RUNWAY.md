@@ -27,6 +27,11 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 
 ### Ready
 
+- nenhuma; #39/T8.5 aguarda somente validação auditiva humana.
+
+### In-progress
+
+- #39 / T8.5 — cinco amostras reais geradas e round-trip auxiliar registrado em `docs/tts/T8.5_QA_REPORT.md`; escuta humana pendente.
 
 ### Blocked-technical
 
@@ -35,6 +40,7 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 ### Blocked-human
 
 - #8 — decisão nativa do Realtime 0.5B; independente do Gate C.
+- #39 — escuta humana de naturalidade, prosódia, pronúncia e artefatos das amostras reais.
 
 ### Backlog / não executável agora
 
@@ -42,25 +48,25 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 
 ## Próxima issue executável
 
-Formalizar T8.5 - QA PT-BR com amostras auditáveis.
+Aguardar validação humana da issue #39/T8.5; não há outra fatia TTS segura antes dessa decisão.
 
 ## DAG imediato
 
 ```text
-#21 -> #25 done -> Gate C done -> #30/T6.1 done -> #31/T6.2 done -> #32/T7.1 done -> #33/T7.2 done -> #34/T7.3 done -> #35/T8.1 done -> #36/T8.2 done -> #37/T8.3 done -> #38/T8.4 done -> T8.5 next
+#21 -> #25 done -> Gate C done -> #30/T6.1 done -> #31/T6.2 done -> #32/T7.1 done -> #33/T7.2 done -> #34/T7.3 done -> #35/T8.1 done -> #36/T8.2 done -> #37/T8.3 done -> #38/T8.4 done -> #39/T8.5 pending-human
 ```
 
 ## Limites da próxima execução
 
 - não iniciar T6.3 (preview/UI);
 - não iniciar T7.2 na mesma issue de T7.1;
-- não iniciar T8.5 na mesma issue de T8.4;
+- não iniciar T8.6 enquanto #39/T8.5 não tiver aceite humano;
 - não alterar engines, adapters, `main.py`, routers ou UI;
 - não iniciar Realtime.
 
 ## Critério de parada da próxima execução
 
-Parar a proxima unidade quando T8.5 estiver delimitada, implementada, testada e persistida; nao iniciar T8.6 na mesma issue.
+Parar até que #39/T8.5 receba validação auditiva humana e suas notas sejam persistidas; só então avaliar a próxima unidade.
 
 ## Regra de continuidade
 
