@@ -30,6 +30,7 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 ### Blocked-human
 
 - #8 — decisão nativa do Realtime 0.5B; independente do Gate C.
+- T7.3 — falta política de transição entre estilos: quando aplicar crossfade, duração/limiar e se a regra é fixa ou configurável.
 
 ### Backlog / não executável agora
 
@@ -37,12 +38,12 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 
 ## Próxima issue executável
 
-Formalizar T7.3 - transicoes de estilo, somente com politica de crossfade aprovada.
+T7.3 bloqueada até decisão humana sobre política de crossfade/transição.
 
 ## DAG imediato
 
 ```text
-#21 -> #25 done -> Gate C done -> #30/T6.1 done -> #31/T6.2 done -> #32/T7.1 done -> #33/T7.2 done -> T7.3 needs-policy
+#21 -> #25 done -> Gate C done -> #30/T6.1 done -> #31/T6.2 done -> #32/T7.1 done -> #33/T7.2 done -> T7.3 blocked-human
 ```
 
 ## Limites da próxima execução

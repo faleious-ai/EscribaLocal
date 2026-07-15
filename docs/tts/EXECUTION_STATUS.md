@@ -66,6 +66,7 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 | --- | --- | --- | --- |
 | #8 | HITL — Realtime 0.5B | blocked | Bloqueia somente a frente nativa do Realtime, não Gate C. |
 | #12 | Validação final | blocked | Depende de gates posteriores e de evidência real em hardware. |
+| T7.3 | Transições de estilo | blocked-human | Falta decisão sobre ativação, duração/limiar e configurabilidade do crossfade entre estilos. |
 
 
 ## Reconcilia??o de T5.1
@@ -93,6 +94,14 @@ Evid?ncia: `19 passed` em `tests/test_tts_orchestration.py`; `265 passed, 4 warn
 1. fechar #32 com mapa aceite -> evidência;
 2. formalizar T7.2 como unidade executável de cache e remontagem;
 3. não iniciar T6.3, engines, UI ou T7.3 na issue seguinte.
+
+## Bloqueio atual
+
+T7.3 precisa de uma política explícita antes de virar issue executável:
+
+- recomendação: crossfade linear fixo de 20 ms somente entre segmentos consecutivos com mudança de `style_id`, sem crossfade em pausas/eventos e sem alteração de pitch;
+- alternativa conservadora: manter apenas fades de borda de T7.1 e não aplicar crossfade;
+- alternativa configurável: permitir duração/curva por estilo, com maior escopo e risco de inconsistência.
 
 ## Próximo passo permitido
 
