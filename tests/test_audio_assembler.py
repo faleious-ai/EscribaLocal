@@ -4,7 +4,7 @@ import wave
 import numpy as np
 from scipy.io import wavfile
 
-from services.audio_assembler import assemble_render_plan
+from services.audio_assembler import AudioAssemblyError, RenderAudioCache, assemble_cached_render_plan, assemble_render_plan
 from services.tts_orchestration import RenderJob, RenderPlan
 
 
@@ -67,3 +67,24 @@ def test_assembler_resamples_stereo_wav_and_rejects_missing_event():
         assert "evento ausente" in str(exc)
     else:
         raise AssertionError("evento ausente deveria falhar")
+
+
+def test_cache_regenerates_one_job_and_reassembles_from_persisted_segments(tmp_path):
+    cache = RenderAudioCache(tmp_path / "segments")
+    plan = _plan(_job("job-a", 0), _job("job-b", 1))
+    first = assemble_cached_render_plan(
+        plan, cache, regenerated={"job-a": np.ones(24, dtype=np.float32) * 0.1,
+                                  "job-b": np.ones(24, dtype=np.float32) * 0.2}
+    )
+    second = assemble_cached_render_plan(
+        plan, cache, regenerated={"job-b": np.ones(24, dtype=np.float32) * 0.8}
+    )
+
+    assert first.manifest["items"][0]["job_id"] == second.manifest["items"][0]["job_id"]
+    assert first.wav_bytes != second.wav_bytes
+    assert cache.path_for("job-a").exists()
+
+
+def test_cache_rejects_missing_job(tmp_path):
+    with np.testing.assert_raises(AudioAssemblyError):
+        assemble_cached_render_plan(_plan(_job()), RenderAudioCache(tmp_path / "segments"))

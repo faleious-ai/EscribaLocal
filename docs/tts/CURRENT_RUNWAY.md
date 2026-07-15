@@ -18,6 +18,7 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 - #30 / T6.1 - normalizador PT-BR modular concluido em `d02fc83e`, com perfis explicitos e comportamento preservado.
 - #31 / T6.2 - cobertura PT-BR ampliada, com regras deterministicas por classe linguistica e dicionario por chamada.
 - #32 / T7.1 - AudioAssembler deterministico com WAV PCM mono a 24 kHz, timeline, pausas, eventos e fades de borda.
+- #33 / T7.2 - regeneracao individual por cache de `job_id` e remontagem deterministica.
 
 ### Ready
 
@@ -36,24 +37,25 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 
 ## Próxima issue executável
 
-Formalizar T7.2 - regeneracao individual e remontagem por cache.
+Formalizar T7.3 - transicoes de estilo, somente com politica de crossfade aprovada.
 
 ## DAG imediato
 
 ```text
-#21 -> #25 done -> Gate C done -> #30/T6.1 done -> #31/T6.2 done -> #32/T7.1 done -> T7.2 next
+#21 -> #25 done -> Gate C done -> #30/T6.1 done -> #31/T6.2 done -> #32/T7.1 done -> #33/T7.2 done -> T7.3 needs-policy
 ```
 
 ## Limites da próxima execução
 
 - não iniciar T6.3 (preview/UI);
 - não iniciar T7.2 na mesma issue de T7.1;
+- não iniciar T7.3 sem política de transição aprovada;
 - não alterar engines, adapters, `main.py`, routers ou UI;
 - não iniciar Realtime.
 
 ## Critério de parada da próxima execução
 
-Parar a proxima unidade quando T7.2 estiver delimitada, implementada, testada e persistida; nao iniciar T7.3 na mesma issue.
+Parar a proxima unidade quando T7.3 estiver delimitada por política executável; não iniciar crossfade de estilo sem essa política.
 
 ## Regra de continuidade
 

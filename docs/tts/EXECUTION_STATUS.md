@@ -58,6 +58,7 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 | T6.1 | #30 | Normalizador PT-BR modular | verified | regras textuais removidas de `tts_orchestration.py` e centralizadas em `services/pt_br_normalizer.py`, com perfis explicitos por engine e falha para perfil desconhecido. | `d02fc83e`; `30 passed` focais; `276 passed, 4 warnings` na suite completa; `git diff --check` limpo. | T5.2 |
 | T6.2 | #31 | Cobertura PT-BR ampliada | verified | datas completas, horas, moeda, percentuais, unidades, abreviacoes, siglas e dicionario por chamada; URLs, e-mails e telefones protegidos; numeros ate 999.999.999 e acentuacao canonica. | `37 passed` focais; `283 passed, 4 warnings` na suite completa; `git diff --check` limpo. | T6.1 |
 | T7.1 | #32 | AudioAssembler determinístico | verified | WAV PCM mono a 24 kHz; ordem, pausas e eventos na timeline; normalização de canais/sample rate; fades de borda; manifesto final serializável. | `29 passed` focais; `287 passed, 4 warnings` na suíte completa; `git diff --check` limpo. | T6.2 |
+| T7.2 | #33 | Regeneração individual por cache | verified | cache persistente por `job_id`, atualização isolada e remontagem usando segmentos existentes; identidade e timeline T7.1 preservadas. | `31 passed` focais; `289 passed, 4 warnings` na suíte completa; `git diff --check` limpo. | T7.1 |
 
 ## Bloqueios independentes
 
@@ -92,3 +93,9 @@ Evid?ncia: `19 passed` em `tests/test_tts_orchestration.py`; `265 passed, 4 warn
 1. fechar #32 com mapa aceite -> evidência;
 2. formalizar T7.2 como unidade executável de cache e remontagem;
 3. não iniciar T6.3, engines, UI ou T7.3 na issue seguinte.
+
+## Próximo passo permitido
+
+1. fechar #33 com mapa aceite -> evidência;
+2. formalizar T7.3 somente após definir política de crossfade/transição;
+3. preservar T8+ e engines fora desta frente.

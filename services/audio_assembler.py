@@ -1,7 +1,9 @@
 """Montagem determinística de segmentos TTS em WAV canônico."""
 
 import io
+import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Mapping, Optional
 
 import numpy as np
@@ -22,6 +24,32 @@ class AudioAssemblyError(ValueError):
 class AudioAssemblyResult:
     wav_bytes: bytes
     manifest: dict
+
+
+class RenderAudioCache:
+    """Cache local de WAVs intermediários indexado por identidade do job."""
+
+    def __init__(self, root: str | Path):
+        self.root = Path(root)
+
+    def path_for(self, job_id: str) -> Path:
+        clean = str(job_id or "")
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", clean):
+            raise AudioAssemblyError(f"job_id inválido para cache: {job_id!r}.")
+        return self.root / f"{clean}.wav"
+
+    def store(self, job_id: str, audio: object) -> Path:
+        _, normalized = _decode_audio(audio)
+        path = self.path_for(job_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(_wav_bytes(normalized))
+        return path
+
+    def load(self, job_id: str) -> bytes:
+        path = self.path_for(job_id)
+        if not path.is_file():
+            raise AudioAssemblyError(f"Áudio ausente no cache para job: {job_id}.")
+        return path.read_bytes()
 
 
 def _decode_audio(value: object) -> tuple[int, np.ndarray]:
@@ -65,6 +93,13 @@ def _with_edge_fades(audio: np.ndarray) -> np.ndarray:
     return result
 
 
+def _wav_bytes(audio: np.ndarray) -> bytes:
+    pcm = np.clip(audio * 32767.0, -32768, 32767).astype(np.int16)
+    output = io.BytesIO()
+    wavfile.write(output, OUTPUT_SAMPLE_RATE, pcm)
+    return output.getvalue()
+
+
 def assemble_render_plan(plan, segments: Mapping[str, object], events: Optional[Mapping[str, object]] = None) -> AudioAssemblyResult:
     """Monta segmentos e eventos na ordem do RenderPlan, sem mutar as entradas."""
     if not plan.jobs:
@@ -91,10 +126,21 @@ def assemble_render_plan(plan, segments: Mapping[str, object], events: Optional[
         items.append({"kind": "segment", "job_id": job.job_id, "order": job.order,
                       "duration_ms": round(audio.size * 1000 / OUTPUT_SAMPLE_RATE)})
     merged = np.concatenate(chunks) if chunks else np.zeros(0, dtype=np.float32)
-    pcm = np.clip(merged * 32767.0, -32768, 32767).astype(np.int16)
-    output = io.BytesIO()
-    wavfile.write(output, OUTPUT_SAMPLE_RATE, pcm)
+    wav_bytes = _wav_bytes(merged)
     manifest = {"version": getattr(plan, "version", 1), "sample_rate": OUTPUT_SAMPLE_RATE,
-                "channels": OUTPUT_CHANNELS, "duration_ms": round(pcm.size * 1000 / OUTPUT_SAMPLE_RATE),
+                "channels": OUTPUT_CHANNELS, "duration_ms": round(merged.size * 1000 / OUTPUT_SAMPLE_RATE),
                 "items": items}
-    return AudioAssemblyResult(wav_bytes=output.getvalue(), manifest=manifest)
+    return AudioAssemblyResult(wav_bytes=wav_bytes, manifest=manifest)
+
+
+def assemble_cached_render_plan(plan, cache: RenderAudioCache,
+                                 regenerated: Optional[Mapping[str, object]] = None,
+                                 events: Optional[Mapping[str, object]] = None) -> AudioAssemblyResult:
+    """Atualiza somente jobs regenerados e remonta usando o restante do cache."""
+    jobs = {job.job_id for job in plan.jobs}
+    for job_id, audio in (regenerated or {}).items():
+        if job_id not in jobs:
+            raise AudioAssemblyError(f"Job regenerado não pertence ao RenderPlan: {job_id}.")
+        cache.store(job_id, audio)
+    segments = {job_id: cache.load(job_id) for job_id in jobs}
+    return assemble_render_plan(plan, segments, events=events)
