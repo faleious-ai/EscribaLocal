@@ -1,6 +1,6 @@
 # TTS Current Runway
 
-Última atualização: 2026-07-10
+Última atualização: 2026-07-15
 Gate ativo: C — Linguagem, validação e RenderPlan
 Epic operacional: #26
 Fonte canônica: `docs/tts/ESCOPO_DECISOES_PLANO_TTS_ESCRIBALOCAL.md`
@@ -22,6 +22,7 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 - #34 / T7.3 - transicao linear de 20 ms entre estilos adjacentes, sem crossfade em pausas/eventos.
 - #35 / T8.1 - parametros reais do Chatterbox expostos, validados, aplicados por segmento e auditados.
 - #36 / T8.2 - referencias Chatterbox por segmento com falha explicita e metadata auditavel.
+- #37 / T8.3 - multi-voz Chatterbox orquestrado por segmento, com vozes, speakers e referencias auditaveis.
 
 ### Ready
 
@@ -40,25 +41,25 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 
 ## Próxima issue executável
 
-Formalizar T8.3 - multi-voz Chatterbox orquestrado.
+Formalizar T8.4 - cancelamento e unload seguro do Chatterbox.
 
 ## DAG imediato
 
 ```text
-#21 -> #25 done -> Gate C done -> #30/T6.1 done -> #31/T6.2 done -> #32/T7.1 done -> #33/T7.2 done -> #34/T7.3 done -> #35/T8.1 done -> #36/T8.2 done -> T8.3 next
+#21 -> #25 done -> Gate C done -> #30/T6.1 done -> #31/T6.2 done -> #32/T7.1 done -> #33/T7.2 done -> #34/T7.3 done -> #35/T8.1 done -> #36/T8.2 done -> #37/T8.3 done -> T8.4 next
 ```
 
 ## Limites da próxima execução
 
 - não iniciar T6.3 (preview/UI);
 - não iniciar T7.2 na mesma issue de T7.1;
-- não iniciar T8.3 na mesma issue de T8.2;
+- não iniciar T8.4 na mesma issue de T8.3;
 - não alterar engines, adapters, `main.py`, routers ou UI;
 - não iniciar Realtime.
 
 ## Critério de parada da próxima execução
 
-Parar a proxima unidade quando T8.3 estiver delimitada, implementada, testada e persistida; nao iniciar T8.4 na mesma issue.
+Parar a proxima unidade quando T8.4 estiver delimitada, implementada, testada e persistida; nao iniciar T8.5 na mesma issue.
 
 ## Regra de continuidade
 

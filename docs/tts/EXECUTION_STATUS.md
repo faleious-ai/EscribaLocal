@@ -1,6 +1,6 @@
 # TTS Execution Status
 
-Data: 2026-07-10
+Data: 2026-07-15
 
 Fonte de verdade do progresso auditável. Estado curto e próxima ação ficam em
 `docs/tts/CURRENT_RUNWAY.md`; contratos ficam na especificação e nas issues.
@@ -62,6 +62,7 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 | T7.3 | #34 | Transição de estilo por crossfade | verified | crossfade linear de 20 ms apenas em mudança adjacente de `style_id`; pausas/eventos interrompem a transição; manifesto registra duração e transição. | `34 passed` focais; `292 passed, 4 warnings` na suíte completa; `git diff --check` limpo. | T7.2 |
 | T8.1 | #35 | Parâmetros reais do Chatterbox | verified | registry `tts_chatterbox`, defaults/clamp, filtragem por assinatura, overrides por segmento e metadados dos valores usados. | `20 passed` focais; `294 passed, 4 warnings` na suíte completa; `git diff --check` limpo. | T7.3 |
 | T8.2 | #36 | Referência Chatterbox por segmento | verified | referências individuais encaminhadas por chunk, erro explícito para ausência e `references_by_segment` no metadata; compatibilidade neutra preservada. | `21 passed` focais; `295 passed, 4 warnings` na suíte completa; `git diff --check` limpo. | T8.1 |
+| T8.3 | #37 | Multi-voz Chatterbox orquestrado | verified | cada segmento resolve speaker/voz/referência de forma independente, gera chamadas separadas, rejeita mapa ausente e retorna `speakers_by_segment`, `voices_by_segment` e `references_by_segment`. | `35 passed` focais; `296 passed, 4 warnings` na suíte completa; `git diff --check` limpo. | T8.2 |
 
 ## Bloqueios independentes
 
