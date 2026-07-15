@@ -56,6 +56,7 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 | T5.1 | #24 | RenderPlan persist?vel | verified | jobs ordenados e serializ?veis preservam se??o, ordem, voz, estilo, refer?ncia relativa, par?metros e textos original/normalizado; identidade determin?stica cobre toda a sem?ntica de T5.1. | `31bd3ca0`; `19 passed` focais; `265 passed, 4 warnings` na su?te completa; `git diff --check` limpo. #24 pronta para fechamento e #25 pode ser retriada. | T4.3 |
 | T5.2 | #25 | Falantes reais e virtuais | verified | cada job registra speaker logico, voz, estilo canonico, referencia relativa e parametros tipados; aliases resolvem por voz; estilos prontos usam midia propria; falhas sao explicitas. | `a8ffa8d7`; `24 passed` focais; `270 passed, 4 warnings` na suite completa; `git diff --check` limpo. | T5.1 |
 | T6.1 | #30 | Normalizador PT-BR modular | verified | regras textuais removidas de `tts_orchestration.py` e centralizadas em `services/pt_br_normalizer.py`, com perfis explicitos por engine e falha para perfil desconhecido. | `d02fc83e`; `30 passed` focais; `276 passed, 4 warnings` na suite completa; `git diff --check` limpo. | T5.2 |
+| T6.2 | #31 | Cobertura PT-BR ampliada | verified | datas completas, horas, moeda, percentuais, unidades, abreviacoes, siglas e dicionario por chamada; URLs, e-mails e telefones protegidos; numeros ate 999.999.999 e acentuacao canonica. | `37 passed` focais; `283 passed, 4 warnings` na suite completa; `git diff --check` limpo. | T6.1 |
 
 ## Bloqueios independentes
 
@@ -84,3 +85,9 @@ Evid?ncia: `19 passed` em `tests/test_tts_orchestration.py`; `265 passed, 4 warn
 2. formalizar T6.2 como proxima fatia executavel;
 3. ampliar cobertura linguistica somente em T6.2, mantendo API modular;
 4. preservar T6.3 para preview e regras por engine.
+
+## Proximo passo permitido
+
+1. fechar #31 com mapa aceite -> evidencia;
+2. formalizar T7.1 como unidade executavel com contrato de timeline e formatos;
+3. nao iniciar T6.3, engines, UI ou AudioAssembler antes da issue delimitada.

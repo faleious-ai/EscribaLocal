@@ -16,6 +16,7 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 - #24 / T5.1 - RenderPlan persistivel concluido em `31bd3ca0`, com secoes e identidade semantica comprovadas;
 - #25 / T5.2 - falantes reais e virtuais concluidos em `a8ffa8d7`, com resolucao por segmento e falhas sem fallback;
 - #30 / T6.1 - normalizador PT-BR modular concluido em `d02fc83e`, com perfis explicitos e comportamento preservado.
+- #31 / T6.2 - cobertura PT-BR ampliada, com regras deterministicas por classe linguistica e dicionario por chamada.
 
 ### Ready
 
@@ -34,25 +35,24 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 
 ## Próxima issue executável
 
-Formalizar T6.2 - ampliar cobertura de normalizacao PT-BR - como proxima issue executavel.
+Formalizar T7.1 - AudioAssembler - somente apos definir o contrato de timeline, eventos e formatos de audio.
 
 ## DAG imediato
 
 ```text
-#21 -> #25 done -> Gate C done -> #30/T6.1 done -> T6.2 next
+#21 -> #25 done -> Gate C done -> #30/T6.1 done -> #31/T6.2 done -> T7.1 needs-contract
 ```
 
 ## Limites da próxima execução
 
-- não implementar T5.2;
+- não iniciar T6.3 (preview/UI);
+- não implementar AudioAssembler antes de uma issue delimitada;
 - não alterar engines, adapters, `main.py`, routers ou UI;
-- não gerar nem montar áudio;
-- não iniciar Realtime;
-- não ampliar T5.1 para AudioAssembler ou timeline final.
+- não iniciar Realtime.
 
 ## Critério de parada da próxima execução
 
-Parar a proxima unidade quando T6.2 estiver delimitada, implementada, testada e persistida; nao iniciar T6.3 na mesma issue.
+Parar a proxima unidade quando T7.1 estiver delimitada por contrato executavel; nao iniciar implementacao de AudioAssembler sem esse contrato.
 
 ## Regra de continuidade
 

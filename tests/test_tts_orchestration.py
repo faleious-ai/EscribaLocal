@@ -13,6 +13,12 @@ def test_render_plan_is_ordered_and_serializable():
     assert [job.job_id for job in plan.jobs] == [job.job_id for job in build_render_plan(ast, voice_id="voice-a", reference="ref.wav").jobs]
 
 
+def test_render_plan_preserves_original_and_uses_expanded_normalized_text():
+    plan = build_render_plan(parse_script("A reunião é em 03/08/2026."), voice_id="voice-a")
+    assert plan.jobs[0].original_text == "A reunião é em 03/08/2026."
+    assert plan.jobs[0].normalized_text == "A reunião é em três de agosto de dois mil e vinte e seis."
+
+
 def test_render_plan_preserves_sections_order_and_manifest_version():
     ast = parse_script("## Abertura\nPrimeiro.\n## Encerramento\n[serio]\nSegundo 2.\n[/serio]")
     plan = build_render_plan(ast, voice_id="voice-a", reference="refs/neutral.wav")
