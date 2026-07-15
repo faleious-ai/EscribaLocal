@@ -61,6 +61,7 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 | T7.2 | #33 | Regeneração individual por cache | verified | cache persistente por `job_id`, atualização isolada e remontagem usando segmentos existentes; identidade e timeline T7.1 preservadas. | `31 passed` focais; `289 passed, 4 warnings` na suíte completa; `git diff --check` limpo. | T7.1 |
 | T7.3 | #34 | Transição de estilo por crossfade | verified | crossfade linear de 20 ms apenas em mudança adjacente de `style_id`; pausas/eventos interrompem a transição; manifesto registra duração e transição. | `34 passed` focais; `292 passed, 4 warnings` na suíte completa; `git diff --check` limpo. | T7.2 |
 | T8.1 | #35 | Parâmetros reais do Chatterbox | verified | registry `tts_chatterbox`, defaults/clamp, filtragem por assinatura, overrides por segmento e metadados dos valores usados. | `20 passed` focais; `294 passed, 4 warnings` na suíte completa; `git diff --check` limpo. | T7.3 |
+| T8.2 | #36 | Referência Chatterbox por segmento | verified | referências individuais encaminhadas por chunk, erro explícito para ausência e `references_by_segment` no metadata; compatibilidade neutra preservada. | `21 passed` focais; `295 passed, 4 warnings` na suíte completa; `git diff --check` limpo. | T8.1 |
 
 ## Bloqueios independentes
 

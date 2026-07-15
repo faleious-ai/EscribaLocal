@@ -347,6 +347,7 @@ class ChatterboxAdapter:
         segment_texts: Optional[Sequence[str]] = None,
         parameters: Optional[Mapping[str, Any]] = None,
         segment_parameters: Optional[Sequence[Mapping[str, Any]]] = None,
+        segment_references: Optional[Sequence[str]] = None,
     ) -> Dict[str, Any]:
         from services import voice_profiles
         from services.vibevoice_tts_1_5b import VoiceUnavailableError, _wav_bytes_from_array
@@ -411,6 +412,14 @@ class ChatterboxAdapter:
 
         sample_rate = getattr(self.model, "sr", 24000)
         chunk_texts = self._chunk_texts_for_generation(text=text, segment_texts=segment_texts)
+        if segment_references is not None and len(segment_references) != len(chunk_texts):
+            raise VoiceUnavailableError("A quantidade de referências deve corresponder aos segmentos Chatterbox.")
+        reference_paths = []
+        for index in range(len(chunk_texts)):
+            candidate = ref_path if segment_references is None else str(segment_references[index] or "").strip()
+            if not candidate or not os.path.exists(candidate):
+                raise VoiceUnavailableError(f"Referência Chatterbox ausente no segmento {index}: {candidate or '<vazia>'}.")
+            reference_paths.append(candidate)
         parameter_sets = []
         for index in range(len(chunk_texts)):
             overrides = {}
@@ -436,7 +445,7 @@ class ChatterboxAdapter:
             generation_kwargs = dict(parameter_sets[index]["used"])
             audio_tensor = self.model.generate(
                 text=chunk_text,
-                audio_prompt_path=ref_path,
+                audio_prompt_path=reference_paths[index],
                 **kwargs,
                 **generation_kwargs,
             )
@@ -465,6 +474,7 @@ class ChatterboxAdapter:
             "fallback": False,
             "parameters": parameter_sets[0]["used"] if len(parameter_sets) == 1 else {},
             "parameters_by_segment": parameter_sets,
+            "references_by_segment": reference_paths,
         }
 
 

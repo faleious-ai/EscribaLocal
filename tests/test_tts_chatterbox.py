@@ -325,3 +325,58 @@ def test_chatterbox_parameters_and_segment_overrides_are_audited(monkeypatch, tm
     assert FakeTTS.calls[0]["seed"] == 7
     assert result["parameters_by_segment"][1]["used"]["temperature"] == 1.1
     chatterbox_engine.unload()
+
+
+def test_chatterbox_uses_reference_per_segment_and_audits_paths(monkeypatch, tmp_path):
+    import importlib.util
+    import sys
+    import types
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object() if name == "chatterbox" else None)
+    fake_chatterbox = types.ModuleType("chatterbox")
+    fake_mtl = types.ModuleType("chatterbox.mtl_tts")
+
+    class FakeTTS:
+        sr = 24000
+        calls = []
+
+        @classmethod
+        def from_pretrained(cls, repo_id, device):
+            return cls()
+
+        def generate(self, text, audio_prompt_path, **kwargs):
+            self.calls.append(audio_prompt_path)
+            return [0.1, -0.1] * 1200
+
+    fake_mtl.ChatterboxMultilingualTTS = FakeTTS
+    monkeypatch.setitem(sys.modules, "chatterbox", fake_chatterbox)
+    monkeypatch.setitem(sys.modules, "chatterbox.mtl_tts", fake_mtl)
+    chatterbox_engine.unload()
+
+    voice_id = "11111111-2222-3333-4444-555555555555"
+    neutral = tmp_path / "neutral.wav"
+    first = tmp_path / "first.wav"
+    second = tmp_path / "second.wav"
+    for path in (neutral, first, second):
+        path.write_bytes(b"0" * 44)
+    monkeypatch.setattr(voice_profiles, "resolve_voice_id", lambda vid: voice_id)
+    monkeypatch.setattr(voice_profiles, "get_voice", lambda vid: {"id": voice_id})
+    monkeypatch.setattr(voice_profiles, "reference_path", lambda vid: neutral)
+
+    result = chatterbox_engine.generate_voice_chatterbox(
+        text="Um Dois",
+        voice_id=voice_id,
+        segment_texts=["Um", "Dois"],
+        segment_references=[str(first), str(second)],
+    )
+
+    assert FakeTTS.calls == [str(first), str(second)]
+    assert result["references_by_segment"] == [str(first), str(second)]
+    with pytest.raises(VoiceUnavailableError, match="Referência Chatterbox ausente"):
+        chatterbox_engine.generate_voice_chatterbox(
+            text="Um Dois",
+            voice_id=voice_id,
+            segment_texts=["Um", "Dois"],
+            segment_references=[str(first), str(tmp_path / "missing.wav")],
+        )
+    chatterbox_engine.unload()
