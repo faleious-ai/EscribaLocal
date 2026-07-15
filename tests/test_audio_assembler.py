@@ -88,3 +88,42 @@ def test_cache_regenerates_one_job_and_reassembles_from_persisted_segments(tmp_p
 def test_cache_rejects_missing_job(tmp_path):
     with np.testing.assert_raises(AudioAssemblyError):
         assemble_cached_render_plan(_plan(_job()), RenderAudioCache(tmp_path / "segments"))
+
+
+def test_style_change_crossfades_only_adjacent_segments():
+    plan = _plan(
+        _job("job-a", 0, style_id="calmo"),
+        _job("job-b", 1, style_id="serio"),
+    )
+    result = assemble_render_plan(
+        plan,
+        {"job-a": np.ones(960, dtype=np.float32) * 0.2, "job-b": np.ones(960, dtype=np.float32) * 0.4},
+    )
+
+    assert result.manifest["duration_ms"] == 60
+    assert result.manifest["transition_ms"] == 20
+
+
+def test_pause_prevents_style_crossfade():
+    plan = _plan(
+        _job("job-a", 0, style_id="calmo"),
+        _job("job-b", 1, style_id="serio", pause_before_ms=100),
+    )
+    result = assemble_render_plan(
+        plan,
+        {"job-a": np.ones(960, dtype=np.float32), "job-b": np.ones(960, dtype=np.float32)},
+    )
+
+    assert result.manifest["duration_ms"] == 180
+    assert result.manifest["transition_ms"] == 0
+
+
+def test_same_style_keeps_segments_separate_without_transition():
+    plan = _plan(_job("job-a", 0, style_id="calmo"), _job("job-b", 1, style_id="calmo"))
+    result = assemble_render_plan(
+        plan,
+        {"job-a": np.ones(960, dtype=np.float32), "job-b": np.ones(960, dtype=np.float32)},
+    )
+
+    assert result.manifest["duration_ms"] == 80
+    assert result.manifest["transition_ms"] == 0

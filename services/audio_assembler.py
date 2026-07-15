@@ -14,6 +14,7 @@ from scipy.signal import resample_poly
 OUTPUT_SAMPLE_RATE = 24_000
 OUTPUT_CHANNELS = 1
 FADE_MS = 5
+CROSSFADE_MS = 20
 
 
 class AudioAssemblyError(ValueError):
@@ -100,6 +101,16 @@ def _wav_bytes(audio: np.ndarray) -> bytes:
     return output.getvalue()
 
 
+def _crossfade(left: np.ndarray, right: np.ndarray) -> tuple[np.ndarray, int]:
+    overlap = min(round(OUTPUT_SAMPLE_RATE * CROSSFADE_MS / 1000), left.size, right.size)
+    if not overlap:
+        return np.concatenate((left, right)), 0
+    incoming = np.linspace(0.0, 1.0, overlap, endpoint=True, dtype=np.float32)
+    outgoing = 1.0 - incoming
+    blended = left[-overlap:] * outgoing + right[:overlap] * incoming
+    return np.concatenate((left[:-overlap], blended, right[overlap:])), overlap
+
+
 def assemble_render_plan(plan, segments: Mapping[str, object], events: Optional[Mapping[str, object]] = None) -> AudioAssemblyResult:
     """Monta segmentos e eventos na ordem do RenderPlan, sem mutar as entradas."""
     if not plan.jobs:
@@ -107,29 +118,38 @@ def assemble_render_plan(plan, segments: Mapping[str, object], events: Optional[
     event_audio = events or {}
     chunks = []
     items = []
+    last_segment_job = None
+    transition_ms = 0
     for job in sorted(plan.jobs, key=lambda item: item.order):
         pause_ms = int(getattr(job, "pause_before_ms", 0) or 0)
         if pause_ms:
             chunks.append(_silence(pause_ms))
             items.append({"kind": "pause", "duration_ms": pause_ms, "before_job_id": job.job_id})
+            last_segment_job = None
         for event_id in tuple(getattr(job, "events_before", ()) or ()):
             if event_id not in event_audio:
                 raise AudioAssemblyError(f"Áudio do evento ausente: {event_id}.")
             _, event = _decode_audio(event_audio[event_id])
             chunks.append(_with_edge_fades(event))
             items.append({"kind": "event", "event_id": event_id, "duration_ms": round(event.size * 1000 / OUTPUT_SAMPLE_RATE)})
+            last_segment_job = None
         if job.job_id not in segments:
             raise AudioAssemblyError(f"Áudio ausente para job: {job.job_id}.")
         _, audio = _decode_audio(segments[job.job_id])
         audio = _with_edge_fades(audio)
-        chunks.append(audio)
+        if last_segment_job is not None and last_segment_job.style_id != job.style_id:
+            chunks[-1], overlap = _crossfade(chunks[-1], audio)
+            transition_ms += round(overlap * 1000 / OUTPUT_SAMPLE_RATE)
+        else:
+            chunks.append(audio)
         items.append({"kind": "segment", "job_id": job.job_id, "order": job.order,
                       "duration_ms": round(audio.size * 1000 / OUTPUT_SAMPLE_RATE)})
+        last_segment_job = job
     merged = np.concatenate(chunks) if chunks else np.zeros(0, dtype=np.float32)
     wav_bytes = _wav_bytes(merged)
     manifest = {"version": getattr(plan, "version", 1), "sample_rate": OUTPUT_SAMPLE_RATE,
                 "channels": OUTPUT_CHANNELS, "duration_ms": round(merged.size * 1000 / OUTPUT_SAMPLE_RATE),
-                "items": items}
+                "transition_ms": transition_ms, "items": items}
     return AudioAssemblyResult(wav_bytes=wav_bytes, manifest=manifest)
 
 

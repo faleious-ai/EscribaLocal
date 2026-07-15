@@ -19,6 +19,7 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 - #31 / T6.2 - cobertura PT-BR ampliada, com regras deterministicas por classe linguistica e dicionario por chamada.
 - #32 / T7.1 - AudioAssembler deterministico com WAV PCM mono a 24 kHz, timeline, pausas, eventos e fades de borda.
 - #33 / T7.2 - regeneracao individual por cache de `job_id` e remontagem deterministica.
+- #34 / T7.3 - transicao linear de 20 ms entre estilos adjacentes, sem crossfade em pausas/eventos.
 
 ### Ready
 
@@ -30,7 +31,6 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 ### Blocked-human
 
 - #8 — decisão nativa do Realtime 0.5B; independente do Gate C.
-- T7.3 — falta política de transição entre estilos: quando aplicar crossfade, duração/limiar e se a regra é fixa ou configurável.
 
 ### Backlog / não executável agora
 
@@ -38,25 +38,25 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 
 ## Próxima issue executável
 
-T7.3 bloqueada até decisão humana sobre política de crossfade/transição.
+Formalizar T8.1 - expor parametros reais do Chatterbox.
 
 ## DAG imediato
 
 ```text
-#21 -> #25 done -> Gate C done -> #30/T6.1 done -> #31/T6.2 done -> #32/T7.1 done -> #33/T7.2 done -> T7.3 blocked-human
+#21 -> #25 done -> Gate C done -> #30/T6.1 done -> #31/T6.2 done -> #32/T7.1 done -> #33/T7.2 done -> #34/T7.3 done -> T8.1 next
 ```
 
 ## Limites da próxima execução
 
 - não iniciar T6.3 (preview/UI);
 - não iniciar T7.2 na mesma issue de T7.1;
-- não iniciar T7.3 sem política de transição aprovada;
+- não iniciar T8.1 na mesma issue de T7.3;
 - não alterar engines, adapters, `main.py`, routers ou UI;
 - não iniciar Realtime.
 
 ## Critério de parada da próxima execução
 
-Parar a proxima unidade quando T7.3 estiver delimitada por política executável; não iniciar crossfade de estilo sem essa política.
+Parar a proxima unidade quando T8.1 estiver delimitada, implementada, testada e persistida; nao iniciar T8.2 na mesma issue.
 
 ## Regra de continuidade
 

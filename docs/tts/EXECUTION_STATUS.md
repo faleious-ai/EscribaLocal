@@ -59,6 +59,7 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 | T6.2 | #31 | Cobertura PT-BR ampliada | verified | datas completas, horas, moeda, percentuais, unidades, abreviacoes, siglas e dicionario por chamada; URLs, e-mails e telefones protegidos; numeros ate 999.999.999 e acentuacao canonica. | `37 passed` focais; `283 passed, 4 warnings` na suite completa; `git diff --check` limpo. | T6.1 |
 | T7.1 | #32 | AudioAssembler determinístico | verified | WAV PCM mono a 24 kHz; ordem, pausas e eventos na timeline; normalização de canais/sample rate; fades de borda; manifesto final serializável. | `29 passed` focais; `287 passed, 4 warnings` na suíte completa; `git diff --check` limpo. | T6.2 |
 | T7.2 | #33 | Regeneração individual por cache | verified | cache persistente por `job_id`, atualização isolada e remontagem usando segmentos existentes; identidade e timeline T7.1 preservadas. | `31 passed` focais; `289 passed, 4 warnings` na suíte completa; `git diff --check` limpo. | T7.1 |
+| T7.3 | #34 | Transição de estilo por crossfade | verified | crossfade linear de 20 ms apenas em mudança adjacente de `style_id`; pausas/eventos interrompem a transição; manifesto registra duração e transição. | `34 passed` focais; `292 passed, 4 warnings` na suíte completa; `git diff --check` limpo. | T7.2 |
 
 ## Bloqueios independentes
 
@@ -66,7 +67,6 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 | --- | --- | --- | --- |
 | #8 | HITL — Realtime 0.5B | blocked | Bloqueia somente a frente nativa do Realtime, não Gate C. |
 | #12 | Validação final | blocked | Depende de gates posteriores e de evidência real em hardware. |
-| T7.3 | Transições de estilo | blocked-human | Falta decisão sobre ativação, duração/limiar e configurabilidade do crossfade entre estilos. |
 
 
 ## Reconcilia??o de T5.1
@@ -95,16 +95,18 @@ Evid?ncia: `19 passed` em `tests/test_tts_orchestration.py`; `265 passed, 4 warn
 2. formalizar T7.2 como unidade executável de cache e remontagem;
 3. não iniciar T6.3, engines, UI ou T7.3 na issue seguinte.
 
-## Bloqueio atual
+## Decisão consolidada de T7.3
 
-T7.3 precisa de uma política explícita antes de virar issue executável:
-
-- recomendação: crossfade linear fixo de 20 ms somente entre segmentos consecutivos com mudança de `style_id`, sem crossfade em pausas/eventos e sem alteração de pitch;
-- alternativa conservadora: manter apenas fades de borda de T7.1 e não aplicar crossfade;
-- alternativa configurável: permitir duração/curva por estilo, com maior escopo e risco de inconsistência.
+Crossfade linear fixo de 20 ms somente entre segmentos consecutivos com mudança de `style_id`; pausas e eventos interrompem a adjacência, sem alteração de pitch.
 
 ## Próximo passo permitido
 
-1. fechar #33 com mapa aceite -> evidência;
-2. formalizar T7.3 somente após definir política de crossfade/transição;
-3. preservar T8+ e engines fora desta frente.
+1. fechar #34 com mapa aceite -> evidência;
+2. formalizar T8.1 como próxima fatia executável;
+3. preservar T8.2 e engines posteriores para as issues seguintes.
+
+## Próximo passo permitido
+
+1. fechar #34 com mapa aceite -> evidência;
+2. formalizar T8.1 como fatia executável de parâmetros Chatterbox;
+3. preservar T8.2 (referência por segmento) para a issue seguinte.
