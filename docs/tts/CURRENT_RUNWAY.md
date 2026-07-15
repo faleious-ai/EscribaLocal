@@ -28,6 +28,7 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 ### Blocked-human
 
 - #8 — decisão nativa do Realtime 0.5B; independente do Gate C.
+- T7.1 — falta contrato de montagem: formato canônico de saída, precedência entre pausa/evento e política de transição entre segmentos. Sem essas decisões não há critério verificável para AudioAssembler.
 
 ### Backlog / não executável agora
 

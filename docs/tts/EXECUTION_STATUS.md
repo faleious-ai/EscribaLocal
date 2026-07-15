@@ -64,6 +64,7 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 | --- | --- | --- | --- |
 | #8 | HITL — Realtime 0.5B | blocked | Bloqueia somente a frente nativa do Realtime, não Gate C. |
 | #12 | Validação final | blocked | Depende de gates posteriores e de evidência real em hardware. |
+| T7.1 | Contrato de AudioAssembler | blocked-human | Exige decisão explícita sobre formato de saída, ordenação de pausa/evento e transições antes de implementar uma timeline de áudio. |
 
 
 ## Reconcilia??o de T5.1
