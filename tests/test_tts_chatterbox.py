@@ -360,7 +360,7 @@ def test_chatterbox_uses_reference_per_segment_and_audits_paths(monkeypatch, tmp
     for path in (neutral, first, second):
         path.write_bytes(b"0" * 44)
     monkeypatch.setattr(voice_profiles, "resolve_voice_id", lambda vid: voice_id)
-    monkeypatch.setattr(voice_profiles, "get_voice", lambda vid: {"id": voice_id})
+    monkeypatch.setattr(voice_profiles, "get_voice", lambda vid: {"id": vid})
     monkeypatch.setattr(voice_profiles, "reference_path", lambda vid: neutral)
 
     result = chatterbox_engine.generate_voice_chatterbox(
@@ -369,14 +369,83 @@ def test_chatterbox_uses_reference_per_segment_and_audits_paths(monkeypatch, tmp
         segment_texts=["Um", "Dois"],
         segment_references=[str(first), str(second)],
     )
-
     assert FakeTTS.calls == [str(first), str(second)]
     assert result["references_by_segment"] == [str(first), str(second)]
-    with pytest.raises(VoiceUnavailableError, match="Referência Chatterbox ausente"):
+    with pytest.raises(VoiceUnavailableError, match="ausente"):
         chatterbox_engine.generate_voice_chatterbox(
             text="Um Dois",
             voice_id=voice_id,
             segment_texts=["Um", "Dois"],
             segment_references=[str(first), str(tmp_path / "missing.wav")],
         )
+    chatterbox_engine.unload()
+
+
+def test_chatterbox_orchestrates_distinct_speaker_voices_by_segment(monkeypatch, tmp_path):
+    import importlib.util
+    import sys
+    import types
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object() if name == "chatterbox" else None)
+    fake_chatterbox = types.ModuleType("chatterbox")
+    fake_mtl = types.ModuleType("chatterbox.mtl_tts")
+
+    class FakeTTS:
+        sr = 24000
+        calls = []
+
+        @classmethod
+        def from_pretrained(cls, repo_id, device):
+            return cls()
+
+        def generate(self, text, audio_prompt_path, **kwargs):
+            self.calls.append(audio_prompt_path)
+            return [0.1, -0.1] * 1200
+
+    fake_mtl.ChatterboxMultilingualTTS = FakeTTS
+    monkeypatch.setitem(sys.modules, "chatterbox", fake_chatterbox)
+    monkeypatch.setitem(sys.modules, "chatterbox.mtl_tts", fake_mtl)
+    chatterbox_engine.unload()
+
+    voice_a = "11111111-2222-3333-4444-555555555551"
+    voice_b = "11111111-2222-3333-4444-555555555552"
+    ref_a = tmp_path / "ana.wav"
+    ref_b = tmp_path / "carlos.wav"
+    ref_a.write_bytes(b"0" * 44)
+    ref_b.write_bytes(b"0" * 44)
+    refs = {voice_a: ref_a, voice_b: ref_b}
+    monkeypatch.setattr(voice_profiles, "resolve_voice_id", lambda vid: vid)
+    monkeypatch.setattr(voice_profiles, "get_voice", lambda vid: {"id": vid})
+    monkeypatch.setattr(voice_profiles, "reference_path", lambda vid: refs[vid])
+    monkeypatch.setattr(voice_profiles, "chatterbox_reference_path", lambda vid: refs[vid])
+
+    result = chatterbox_engine.generate_voice_chatterbox(
+        text="Ana Carlos",
+        voice_id=voice_a,
+        segment_texts=["Ana", "Carlos"],
+        segment_voice_ids=[voice_a, voice_b],
+        segment_speaker_ids=["speaker_1", "speaker_2"],
+    )
+
+    assert FakeTTS.calls == [str(ref_a), str(ref_b)]
+    assert result["voices_by_segment"] == [voice_a, voice_b]
+    assert result["speakers_by_segment"] == ["speaker_1", "speaker_2"]
+    with pytest.raises(VoiceUnavailableError, match="sem voz mapeada"):
+        chatterbox_engine.generate_voice_chatterbox(
+            text="Ana Carlos",
+            voice_id=voice_a,
+            segment_texts=["Ana", "Carlos"],
+            segment_voice_ids=[voice_a, None],
+        )
+    FakeTTS.calls = []
+    wrapped = generate_voice_1_5b_with_metadata(
+        text="Speaker 1: Ana\nSpeaker 2: Carlos",
+        model_key="chatterbox-tts-pt-br",
+        voice_id=voice_a,
+        speaker_voices={"1": voice_a, "2": voice_b},
+        failure_policy="fail",
+    )
+    assert FakeTTS.calls == [str(ref_a), str(ref_b)]
+    assert wrapped["voices_by_segment"] == [voice_a, voice_b]
+    assert wrapped["speakers_by_segment"] == ["speaker_1", "speaker_2"]
     chatterbox_engine.unload()

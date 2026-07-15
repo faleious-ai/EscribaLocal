@@ -693,6 +693,8 @@ def generate_voice_1_5b_with_metadata(
     chatterbox_parameters: Optional[Dict[str, Any]] = None,
     segment_parameters: Optional[List[Dict[str, Any]]] = None,
     segment_references: Optional[List[str]] = None,
+    segment_voice_ids: Optional[List[str]] = None,
+    segment_speaker_ids: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Geração TTS 1.5B.
 
@@ -735,16 +737,29 @@ def generate_voice_1_5b_with_metadata(
 
     if model_key == "chatterbox-tts-pt-br":
         from services.chatterbox_adapter import chatterbox_engine
+        segment_texts = [segment.text for segment in tts_plan.segments if segment.text]
+        resolved_segment_voice_ids = segment_voice_ids
+        if resolved_segment_voice_ids is None and speaker_voices:
+            resolved_segment_voice_ids = [
+                speaker_voices.get(segment.speaker_number)
+                for segment in tts_plan.segments
+                if segment.text
+            ]
+        resolved_segment_speaker_ids = segment_speaker_ids or [
+            segment.speaker_id for segment in tts_plan.segments if segment.text
+        ]
         return chatterbox_engine.generate_voice_chatterbox(
             text=text,
             voice_id=voice_id,
             speaker_voices=speaker_voices,
             speaker_id=speaker_id,
             speed=speed,
-            segment_texts=[segment.text for segment in tts_plan.segments if segment.text],
+            segment_texts=segment_texts,
             parameters=chatterbox_parameters,
             segment_parameters=segment_parameters,
             segment_references=segment_references,
+            segment_voice_ids=resolved_segment_voice_ids,
+            segment_speaker_ids=resolved_segment_speaker_ids,
         )
 
     if device != "auto":

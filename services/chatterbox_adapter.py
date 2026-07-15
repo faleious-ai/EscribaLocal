@@ -348,6 +348,8 @@ class ChatterboxAdapter:
         parameters: Optional[Mapping[str, Any]] = None,
         segment_parameters: Optional[Sequence[Mapping[str, Any]]] = None,
         segment_references: Optional[Sequence[str]] = None,
+        segment_voice_ids: Optional[Sequence[str]] = None,
+        segment_speaker_ids: Optional[Sequence[str]] = None,
     ) -> Dict[str, Any]:
         from services import voice_profiles
         from services.vibevoice_tts_1_5b import VoiceUnavailableError, _wav_bytes_from_array
@@ -412,11 +414,73 @@ class ChatterboxAdapter:
 
         sample_rate = getattr(self.model, "sr", 24000)
         chunk_texts = self._chunk_texts_for_generation(text=text, segment_texts=segment_texts)
+        base_segments = [
+            segment.strip()
+            for segment in (segment_texts or [text])
+            if segment and segment.strip()
+        ]
+        base_chunk_counts = [
+            len(self._chunk_texts_for_generation(text=segment, segment_texts=[segment]))
+            for segment in base_segments
+        ]
+
+        def expand_segment_values(values, label):
+            if values is None:
+                return None
+            values = list(values)
+            if len(values) == len(chunk_texts):
+                return values
+            if len(values) == len(base_segments):
+                expanded = []
+                for value, count in zip(values, base_chunk_counts):
+                    expanded.extend([value] * count)
+                if len(expanded) == len(chunk_texts):
+                    return expanded
+            raise VoiceUnavailableError(
+                f"A quantidade de {label} deve corresponder aos segmentos Chatterbox."
+            )
+
+        segment_speaker_ids = expand_segment_values(segment_speaker_ids, "speakers")
+        speaker_ids = list(segment_speaker_ids or ([speaker_id] * len(chunk_texts)))
+        segment_voice_ids = expand_segment_values(segment_voice_ids, "vozes")
+        segment_references = expand_segment_values(segment_references, "referências")
+        segment_parameters = expand_segment_values(segment_parameters, "parâmetros")
+        if segment_voice_ids is not None and len(segment_voice_ids) != len(chunk_texts):
+            raise VoiceUnavailableError("A quantidade de vozes deve corresponder aos segmentos Chatterbox.")
+        voice_ids = [resolved_voice_id] * len(chunk_texts)
+        if segment_voice_ids is not None:
+            voice_ids = []
+            for raw_voice_id in segment_voice_ids:
+                if not raw_voice_id:
+                    raise VoiceUnavailableError("Segmento Chatterbox sem voz mapeada.")
+                try:
+                    segment_voice_id = voice_profiles.resolve_voice_id(str(raw_voice_id))
+                    segment_profile = voice_profiles.get_voice(segment_voice_id)
+                    if voice_profiles.is_legacy_windows_voice_id(segment_voice_id):
+                        raise VoiceUnavailableError("Presets Windows não são vozes reais de produção.")
+                    segment_ref = str(voice_profiles.chatterbox_reference_path(segment_voice_id))
+                    if not os.path.exists(segment_ref) and "engines" not in segment_profile:
+                        segment_ref = str(voice_profiles.reference_path(segment_voice_id))
+                    if not os.path.exists(segment_ref):
+                        raise VoiceUnavailableError(f"A voz {segment_voice_id} não possui referência Chatterbox utilizável.")
+                    voice_ids.append(segment_voice_id)
+                except VoiceUnavailableError:
+                    raise
+                except Exception as exc:
+                    raise VoiceUnavailableError(f"Voz de segmento indisponível: {raw_voice_id}.") from exc
         if segment_references is not None and len(segment_references) != len(chunk_texts):
             raise VoiceUnavailableError("A quantidade de referências deve corresponder aos segmentos Chatterbox.")
         reference_paths = []
         for index in range(len(chunk_texts)):
-            candidate = ref_path if segment_references is None else str(segment_references[index] or "").strip()
+            if segment_references is not None:
+                candidate = str(segment_references[index] or "").strip()
+            elif segment_voice_ids is not None and voice_ids[index] != resolved_voice_id:
+                candidate = str(voice_profiles.chatterbox_reference_path(voice_ids[index]))
+                segment_profile = voice_profiles.get_voice(voice_ids[index])
+                if not os.path.exists(candidate) and "engines" not in segment_profile:
+                    candidate = str(voice_profiles.reference_path(voice_ids[index]))
+            else:
+                candidate = ref_path
             if not candidate or not os.path.exists(candidate):
                 raise VoiceUnavailableError(f"Referência Chatterbox ausente no segmento {index}: {candidate or '<vazia>'}.")
             reference_paths.append(candidate)
@@ -475,6 +539,8 @@ class ChatterboxAdapter:
             "parameters": parameter_sets[0]["used"] if len(parameter_sets) == 1 else {},
             "parameters_by_segment": parameter_sets,
             "references_by_segment": reference_paths,
+            "voices_by_segment": voice_ids,
+            "speakers_by_segment": speaker_ids,
         }
 
 
