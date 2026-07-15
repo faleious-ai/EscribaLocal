@@ -255,6 +255,7 @@ def test_chatterbox_from_pretrained_supports_device_first_signature(monkeypatch,
 
     chatterbox_engine.unload()
 
+
     voice_id = "11111111-2222-3333-4444-555555555555"
     ref_wav = tmp_path / "reference.wav"
     ref_wav.write_bytes(b"0" * 44)
@@ -275,4 +276,52 @@ def test_chatterbox_from_pretrained_supports_device_first_signature(monkeypatch,
         {"device": "cpu", "repo_id": "ResembleAI/Chatterbox-Multilingual-pt-br"}
     ]
 
+    chatterbox_engine.unload()
+
+
+def test_chatterbox_parameters_and_segment_overrides_are_audited(monkeypatch, tmp_path):
+    import importlib.util
+    import sys
+    import types
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object() if name == "chatterbox" else None)
+    fake_chatterbox = types.ModuleType("chatterbox")
+    fake_mtl = types.ModuleType("chatterbox.mtl_tts")
+
+    class FakeTTS:
+        sr = 24000
+        calls = []
+
+        @classmethod
+        def from_pretrained(cls, repo_id, device):
+            return cls()
+
+        def generate(self, text, audio_prompt_path, **kwargs):
+            self.calls.append(kwargs)
+            return [0.1, -0.1] * 1200
+
+    fake_mtl.ChatterboxMultilingualTTS = FakeTTS
+    monkeypatch.setitem(sys.modules, "chatterbox", fake_chatterbox)
+    monkeypatch.setitem(sys.modules, "chatterbox.mtl_tts", fake_mtl)
+    chatterbox_engine.unload()
+
+    voice_id = "11111111-2222-3333-4444-555555555555"
+    ref_wav = tmp_path / "reference.wav"
+    ref_wav.write_bytes(b"0" * 44)
+    monkeypatch.setattr(voice_profiles, "resolve_voice_id", lambda vid: voice_id)
+    monkeypatch.setattr(voice_profiles, "get_voice", lambda vid: {"id": voice_id})
+    monkeypatch.setattr(voice_profiles, "reference_path", lambda vid: ref_wav)
+
+    result = chatterbox_engine.generate_voice_chatterbox(
+        text="Um Dois",
+        voice_id=voice_id,
+        segment_texts=["Um", "Dois"],
+        parameters={"temperature": 0.9, "seed": 7},
+        segment_parameters=[{}, {"temperature": 1.1}],
+    )
+
+    assert FakeTTS.calls[0]["temperature"] == 0.9
+    assert FakeTTS.calls[1]["temperature"] == 1.1
+    assert FakeTTS.calls[0]["seed"] == 7
+    assert result["parameters_by_segment"][1]["used"]["temperature"] == 1.1
     chatterbox_engine.unload()

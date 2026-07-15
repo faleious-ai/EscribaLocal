@@ -20,6 +20,7 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 - #32 / T7.1 - AudioAssembler deterministico com WAV PCM mono a 24 kHz, timeline, pausas, eventos e fades de borda.
 - #33 / T7.2 - regeneracao individual por cache de `job_id` e remontagem deterministica.
 - #34 / T7.3 - transicao linear de 20 ms entre estilos adjacentes, sem crossfade em pausas/eventos.
+- #35 / T8.1 - parametros reais do Chatterbox expostos, validados, aplicados por segmento e auditados.
 
 ### Ready
 
@@ -38,25 +39,25 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 
 ## Próxima issue executável
 
-Formalizar T8.1 - expor parametros reais do Chatterbox.
+Formalizar T8.2 - referencia Chatterbox por segmento.
 
 ## DAG imediato
 
 ```text
-#21 -> #25 done -> Gate C done -> #30/T6.1 done -> #31/T6.2 done -> #32/T7.1 done -> #33/T7.2 done -> #34/T7.3 done -> T8.1 next
+#21 -> #25 done -> Gate C done -> #30/T6.1 done -> #31/T6.2 done -> #32/T7.1 done -> #33/T7.2 done -> #34/T7.3 done -> #35/T8.1 done -> T8.2 next
 ```
 
 ## Limites da próxima execução
 
 - não iniciar T6.3 (preview/UI);
 - não iniciar T7.2 na mesma issue de T7.1;
-- não iniciar T8.1 na mesma issue de T7.3;
+- não iniciar T8.2 na mesma issue de T8.1;
 - não alterar engines, adapters, `main.py`, routers ou UI;
 - não iniciar Realtime.
 
 ## Critério de parada da próxima execução
 
-Parar a proxima unidade quando T8.1 estiver delimitada, implementada, testada e persistida; nao iniciar T8.2 na mesma issue.
+Parar a proxima unidade quando T8.2 estiver delimitada, implementada, testada e persistida; nao iniciar T8.3 na mesma issue.
 
 ## Regra de continuidade
 

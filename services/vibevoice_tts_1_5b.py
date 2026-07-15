@@ -690,6 +690,8 @@ def generate_voice_1_5b_with_metadata(
     seed: int = -1,
     failure_policy: str = "cpu",
     device: str = "auto",
+    chatterbox_parameters: Optional[Dict[str, Any]] = None,
+    segment_parameters: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Geração TTS 1.5B.
 
@@ -739,6 +741,8 @@ def generate_voice_1_5b_with_metadata(
             speaker_id=speaker_id,
             speed=speed,
             segment_texts=[segment.text for segment in tts_plan.segments if segment.text],
+            parameters=chatterbox_parameters,
+            segment_parameters=segment_parameters,
         )
 
     if device != "auto":

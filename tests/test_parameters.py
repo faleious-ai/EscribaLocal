@@ -9,7 +9,7 @@ from services.parameters_registry import REGISTRY, get_engine_specs, validate_pa
 # ----------------------------------------------------------------- registro
 
 def test_registry_metadata_complete():
-    assert set(REGISTRY.keys()) == {"whisper", "vibevoice_asr", "tts"}
+    assert set(REGISTRY.keys()) == {"whisper", "vibevoice_asr", "tts", "tts_chatterbox"}
     assert len(REGISTRY["whisper"]) == 9
     assert len(REGISTRY["vibevoice_asr"]) == 9
     # TTS: só parâmetros REAIS do caminho nativo do 1.5B (temperature/top_p/
@@ -19,6 +19,10 @@ def test_registry_metadata_complete():
     assert {"temperature", "top_p", "top_k", "repetition_penalty"}.isdisjoint(tts_names)
     assert {"voice_id", "cfg_scale", "n_diffusion_steps", "max_frames",
             "seed", "failure_policy", "device"} <= tts_names
+
+    chatterbox_names = {spec.name for spec in REGISTRY["tts_chatterbox"]}
+    assert {"exaggeration", "cfg_weight", "temperature", "top_p", "min_p",
+            "repetition_penalty", "seed"} <= chatterbox_names
 
     for engine, specs in REGISTRY.items():
         for spec in specs:
@@ -87,6 +91,14 @@ def test_unknown_param_warned_and_ignored():
     assert any(i["param"] == "warp_drive" for i in result["issues"])
 
 
+def test_chatterbox_parameters_are_typed_and_clamped_by_registry():
+    result = validate_params("tts_chatterbox", {"temperature": "1.2", "seed": "42", "top_p": 4})
+    assert result["valid"] is True
+    assert result["normalized"]["temperature"] == 1.2
+    assert result["normalized"]["seed"] == 42
+    assert result["normalized"]["top_p"] == 1.0
+
+
 def test_bool_coercion_from_strings():
     result = validate_params("whisper", {"vad_filter": "false"})
     assert result["normalized"]["vad_filter"] is False
@@ -113,7 +125,7 @@ def test_validate_unknown_engine_raises():
 
 def test_parameters_endpoints(client):
     data = client.get("/api/parameters").json()
-    assert set(data["engines"].keys()) == {"whisper", "vibevoice_asr", "tts"}
+    assert set(data["engines"].keys()) == {"whisper", "vibevoice_asr", "tts", "tts_chatterbox"}
 
     whisper = client.get("/api/parameters/whisper").json()
     assert len(whisper["parameters"]) == 9

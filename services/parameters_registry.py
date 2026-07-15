@@ -16,7 +16,7 @@ apenas valores impossíveis de converter geram erro.
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-ENGINES = ("whisper", "vibevoice_asr", "tts")
+ENGINES = ("whisper", "vibevoice_asr", "tts", "tts_chatterbox")
 
 
 @dataclass(frozen=True)
@@ -260,10 +260,28 @@ _TTS_PARAMS: List[ParameterSpec] = [
     ),
 ]
 
+_CHATTERBOX_PARAMS: List[ParameterSpec] = [
+    ParameterSpec("exaggeration", "tts_chatterbox", "float", 0.5, 0.0, 1.0,
+                  label="Exaggeration", description="Intensidade expressiva da referência.", impact="qualidade", advanced=True),
+    ParameterSpec("cfg_weight", "tts_chatterbox", "float", 0.5, 0.0, 1.0,
+                  label="CFG weight", description="Aderência da geração ao texto e condicionamento.", impact="qualidade", advanced=True),
+    ParameterSpec("temperature", "tts_chatterbox", "float", 0.8, 0.05, 2.0,
+                  label="Temperature", description="Aleatoriedade da amostragem Chatterbox.", impact="qualidade", advanced=True),
+    ParameterSpec("top_p", "tts_chatterbox", "float", 1.0, 0.0, 1.0,
+                  label="Top-P", description="Núcleo de amostragem da distribuição.", impact="qualidade", advanced=True),
+    ParameterSpec("min_p", "tts_chatterbox", "float", 0.05, 0.0, 1.0,
+                  label="Min-P", description="Probabilidade mínima para tokens candidatos.", impact="qualidade", advanced=True),
+    ParameterSpec("repetition_penalty", "tts_chatterbox", "float", 2.0, 1.0, 3.0,
+                  label="Repetition penalty", description="Penalidade contra repetição de tokens.", impact="qualidade", advanced=True),
+    ParameterSpec("seed", "tts_chatterbox", "int", -1, -1, 2147483647,
+                  label="Seed", description="-1 mantém a seed aleatória quando a runtime suportar.", impact="conteudo", advanced=True),
+]
+
 REGISTRY: Dict[str, List[ParameterSpec]] = {
     "whisper": _WHISPER_PARAMS,
     "vibevoice_asr": _VIBEVOICE_ASR_PARAMS,
     "tts": _TTS_PARAMS,
+    "tts_chatterbox": _CHATTERBOX_PARAMS,
 }
 
 

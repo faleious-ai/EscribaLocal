@@ -3,7 +3,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, Mapping, Optional, Sequence
 
 import numpy as np
 import torch
@@ -87,10 +87,13 @@ class _LocalChatterboxRuntime:
             emotion_adv=exaggeration * torch.ones(1, 1, 1),
         ).to(device=self.device), ref_dict
 
-    def generate(self, text: str, audio_prompt_path: str, language_id: str = "pt", **_kwargs):
+    def generate(self, text: str, audio_prompt_path: str, language_id: str = "pt",
+                 exaggeration: float = 0.5, cfg_weight: float = 0.5,
+                 temperature: float = 0.8, top_p: float = 1.0,
+                 min_p: float = 0.05, repetition_penalty: float = 2.0):
         from chatterbox.models.s3tokenizer import drop_invalid_tokens
 
-        t3_cond, ref_dict = self._prepare_conditionals(audio_prompt_path, exaggeration=0.5)
+        t3_cond, ref_dict = self._prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
 
         text = _punc_norm(text)
         text_tokens = self.tokenizer.text_to_tokens(
@@ -107,11 +110,11 @@ class _LocalChatterboxRuntime:
                 t3_cond=t3_cond,
                 text_tokens=text_tokens,
                 max_new_tokens=1000,
-                temperature=0.8,
-                cfg_weight=0.5,
-                repetition_penalty=2.0,
-                min_p=0.05,
-                top_p=1.0,
+                temperature=temperature,
+                cfg_weight=cfg_weight,
+                repetition_penalty=repetition_penalty,
+                min_p=min_p,
+                top_p=top_p,
             )
             speech_tokens = drop_invalid_tokens(speech_tokens[0]).to(self.device)
             wav, _ = self.s3gen.inference(
@@ -342,6 +345,8 @@ class ChatterboxAdapter:
         speaker_id: str = "speaker_1",
         speed: float = 1.0,
         segment_texts: Optional[Sequence[str]] = None,
+        parameters: Optional[Mapping[str, Any]] = None,
+        segment_parameters: Optional[Sequence[Mapping[str, Any]]] = None,
     ) -> Dict[str, Any]:
         from services import voice_profiles
         from services.vibevoice_tts_1_5b import VoiceUnavailableError, _wav_bytes_from_array
@@ -392,6 +397,12 @@ class ChatterboxAdapter:
         import inspect
 
         sig = inspect.signature(self.model.generate)
+        accepts_kwargs = any(param.kind == inspect.Parameter.VAR_KEYWORD for param in sig.parameters.values())
+        from services.parameters_registry import validate_params
+        from services.parameters_registry import get_engine_specs
+
+        requested = dict(parameters or {})
+        defaults = {spec.name: spec.default for spec in get_engine_specs("tts_chatterbox")}
         kwargs = {}
         if "language_id" in sig.parameters:
             kwargs["language_id"] = "pt"
@@ -400,14 +411,34 @@ class ChatterboxAdapter:
 
         sample_rate = getattr(self.model, "sr", 24000)
         chunk_texts = self._chunk_texts_for_generation(text=text, segment_texts=segment_texts)
+        parameter_sets = []
+        for index in range(len(chunk_texts)):
+            overrides = {}
+            if segment_parameters and index < len(segment_parameters):
+                overrides = dict(segment_parameters[index] or {})
+            requested_for_segment = {**requested, **overrides}
+            validation = validate_params("tts_chatterbox", {**defaults, **requested_for_segment})
+            normalized = validation["normalized"]
+            supported = {
+                key: value for key, value in normalized.items()
+                if key in sig.parameters or accepts_kwargs
+            }
+            unsupported = sorted(set(requested_for_segment) - set(supported))
+            parameter_sets.append({
+                "used": supported,
+                "unsupported": unsupported,
+                "issues": validation["issues"],
+            })
         audio_chunks: list[np.ndarray] = []
         silence = np.zeros(int(sample_rate * 0.18), dtype=np.float32)
 
         for index, chunk_text in enumerate(chunk_texts):
+            generation_kwargs = dict(parameter_sets[index]["used"])
             audio_tensor = self.model.generate(
                 text=chunk_text,
                 audio_prompt_path=ref_path,
                 **kwargs,
+                **generation_kwargs,
             )
             if isinstance(audio_tensor, torch.Tensor):
                 audio_np = audio_tensor.detach().cpu().numpy()
@@ -432,6 +463,8 @@ class ChatterboxAdapter:
             "engine_key": "chatterbox-tts-pt-br",
             "engine_label": "Chatterbox PT-BR",
             "fallback": False,
+            "parameters": parameter_sets[0]["used"] if len(parameter_sets) == 1 else {},
+            "parameters_by_segment": parameter_sets,
         }
 
 
