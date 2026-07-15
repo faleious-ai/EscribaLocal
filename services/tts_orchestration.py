@@ -61,6 +61,8 @@ class RenderJob:
     parameters: Dict[str, object]
     original_text: str
     normalized_text: str
+    pause_before_ms: int = 0
+    events_before: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -99,6 +101,8 @@ def build_render_plan(
     current_section_id: Optional[str] = None
     current_section_title: Optional[str] = None
     section_ordinal = 0
+    pending_pause_ms = 0
+    pending_events: List[str] = []
 
     if reference and (PurePath(reference).is_absolute() or PureWindowsPath(reference).is_absolute()):
         raise TtsOrchestrationError("RenderPlan exige referencia relativa controlada.")
@@ -172,7 +176,7 @@ def build_render_plan(
         return speaker_id, resolved_voice_id, resolved_style["style_id"], resolved_reference, parameters
 
     def walk(nodes: List[ScriptNode], style: Optional[ScriptNode] = None) -> None:
-        nonlocal current_section_id, current_section_title, section_ordinal
+        nonlocal current_section_id, current_section_title, section_ordinal, pending_pause_ms, pending_events
         for node in nodes:
             if node.kind == "subtitle":
                 section_ordinal += 1
@@ -180,13 +184,24 @@ def build_render_plan(
                 current_section_id = section_id_for(node.text, section_ordinal)
             elif node.kind == "style":
                 walk(node.children, node)
+            elif node.kind == "pause":
+                if node.text.endswith("ms"):
+                    pending_pause_ms += int(float(node.text[:-2]))
+                else:
+                    pending_pause_ms += round(float(node.text[:-1]) * 1000)
+            elif node.kind == "event":
+                event_id = {"respiracao": "breath_short", "suspiro": "sigh", "risada": "laugh_soft"}.get(node.text)
+                if event_id is None:
+                    raise TtsOrchestrationError(f"Evento desconhecido: {node.text}.")
+                pending_events.append(event_id)
             elif node.kind == "text":
                 normalized = normalize_pt_br(node.text)
                 order = len(jobs)
                 speaker_id, resolved_voice_id, style_id, resolved_reference, parameters = resolve_segment(style)
                 semantic_key = repr((
                     current_section_id, current_section_title, order, speaker_id, resolved_voice_id,
-                    style_id, resolved_reference, sorted(parameters.items()), node.text, normalized,
+                    style_id, resolved_reference, sorted(parameters.items()), pending_pause_ms,
+                    tuple(pending_events), node.text, normalized,
                 ))
                 jobs.append(RenderJob(
                     job_id=hashlib.sha256(semantic_key.encode("utf-8")).hexdigest()[:16],
@@ -200,7 +215,11 @@ def build_render_plan(
                     parameters=parameters,
                     original_text=node.text,
                     normalized_text=normalized,
+                    pause_before_ms=pending_pause_ms,
+                    events_before=tuple(pending_events),
                 ))
+                pending_pause_ms = 0
+                pending_events = []
 
     walk(ast.nodes)
     return RenderPlan(version=1, jobs=jobs)

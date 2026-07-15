@@ -17,6 +17,7 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 - #25 / T5.2 - falantes reais e virtuais concluidos em `a8ffa8d7`, com resolucao por segmento e falhas sem fallback;
 - #30 / T6.1 - normalizador PT-BR modular concluido em `d02fc83e`, com perfis explicitos e comportamento preservado.
 - #31 / T6.2 - cobertura PT-BR ampliada, com regras deterministicas por classe linguistica e dicionario por chamada.
+- #32 / T7.1 - AudioAssembler deterministico com WAV PCM mono a 24 kHz, timeline, pausas, eventos e fades de borda.
 
 ### Ready
 
@@ -28,7 +29,6 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 ### Blocked-human
 
 - #8 — decisão nativa do Realtime 0.5B; independente do Gate C.
-- T7.1 — falta contrato de montagem: formato canônico de saída, precedência entre pausa/evento e política de transição entre segmentos. Sem essas decisões não há critério verificável para AudioAssembler.
 
 ### Backlog / não executável agora
 
@@ -36,24 +36,24 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 
 ## Próxima issue executável
 
-Formalizar T7.1 - AudioAssembler - somente apos definir o contrato de timeline, eventos e formatos de audio.
+Formalizar T7.2 - regeneracao individual e remontagem por cache.
 
 ## DAG imediato
 
 ```text
-#21 -> #25 done -> Gate C done -> #30/T6.1 done -> #31/T6.2 done -> T7.1 needs-contract
+#21 -> #25 done -> Gate C done -> #30/T6.1 done -> #31/T6.2 done -> #32/T7.1 done -> T7.2 next
 ```
 
 ## Limites da próxima execução
 
 - não iniciar T6.3 (preview/UI);
-- não implementar AudioAssembler antes de uma issue delimitada;
+- não iniciar T7.2 na mesma issue de T7.1;
 - não alterar engines, adapters, `main.py`, routers ou UI;
 - não iniciar Realtime.
 
 ## Critério de parada da próxima execução
 
-Parar a proxima unidade quando T7.1 estiver delimitada por contrato executavel; nao iniciar implementacao de AudioAssembler sem esse contrato.
+Parar a proxima unidade quando T7.2 estiver delimitada, implementada, testada e persistida; nao iniciar T7.3 na mesma issue.
 
 ## Regra de continuidade
 

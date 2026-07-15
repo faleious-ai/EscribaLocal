@@ -19,6 +19,15 @@ def test_render_plan_preserves_original_and_uses_expanded_normalized_text():
     assert plan.jobs[0].normalized_text == "A reunião é em três de agosto de dois mil e vinte e seis."
 
 
+def test_render_plan_carries_pause_and_event_timeline_metadata():
+    plan = build_render_plan(
+        parse_script("Olá.\n[pausa 100ms]\n[respiracao profunda]\nTchau."),
+        voice_id="voice-a",
+    )
+    assert plan.jobs[1].pause_before_ms == 100
+    assert plan.jobs[1].events_before == ("breath_short",)
+
+
 def test_render_plan_preserves_sections_order_and_manifest_version():
     ast = parse_script("## Abertura\nPrimeiro.\n## Encerramento\n[serio]\nSegundo 2.\n[/serio]")
     plan = build_render_plan(ast, voice_id="voice-a", reference="refs/neutral.wav")

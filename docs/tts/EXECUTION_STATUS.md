@@ -57,6 +57,7 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 | T5.2 | #25 | Falantes reais e virtuais | verified | cada job registra speaker logico, voz, estilo canonico, referencia relativa e parametros tipados; aliases resolvem por voz; estilos prontos usam midia propria; falhas sao explicitas. | `a8ffa8d7`; `24 passed` focais; `270 passed, 4 warnings` na suite completa; `git diff --check` limpo. | T5.1 |
 | T6.1 | #30 | Normalizador PT-BR modular | verified | regras textuais removidas de `tts_orchestration.py` e centralizadas em `services/pt_br_normalizer.py`, com perfis explicitos por engine e falha para perfil desconhecido. | `d02fc83e`; `30 passed` focais; `276 passed, 4 warnings` na suite completa; `git diff --check` limpo. | T5.2 |
 | T6.2 | #31 | Cobertura PT-BR ampliada | verified | datas completas, horas, moeda, percentuais, unidades, abreviacoes, siglas e dicionario por chamada; URLs, e-mails e telefones protegidos; numeros ate 999.999.999 e acentuacao canonica. | `37 passed` focais; `283 passed, 4 warnings` na suite completa; `git diff --check` limpo. | T6.1 |
+| T7.1 | #32 | AudioAssembler determinístico | verified | WAV PCM mono a 24 kHz; ordem, pausas e eventos na timeline; normalização de canais/sample rate; fades de borda; manifesto final serializável. | `29 passed` focais; `287 passed, 4 warnings` na suíte completa; `git diff --check` limpo. | T6.2 |
 
 ## Bloqueios independentes
 
@@ -64,7 +65,6 @@ Contrato específico: `docs/tts/RENDERPLAN_CONTRACT.md`
 | --- | --- | --- | --- |
 | #8 | HITL — Realtime 0.5B | blocked | Bloqueia somente a frente nativa do Realtime, não Gate C. |
 | #12 | Validação final | blocked | Depende de gates posteriores e de evidência real em hardware. |
-| T7.1 | Contrato de AudioAssembler | blocked-human | Exige decisão explícita sobre formato de saída, ordenação de pausa/evento e transições antes de implementar uma timeline de áudio. |
 
 
 ## Reconcilia??o de T5.1
@@ -89,6 +89,6 @@ Evid?ncia: `19 passed` em `tests/test_tts_orchestration.py`; `265 passed, 4 warn
 
 ## Proximo passo permitido
 
-1. fechar #31 com mapa aceite -> evidencia;
-2. formalizar T7.1 como unidade executavel com contrato de timeline e formatos;
-3. nao iniciar T6.3, engines, UI ou AudioAssembler antes da issue delimitada.
+1. fechar #32 com mapa aceite -> evidência;
+2. formalizar T7.2 como unidade executável de cache e remontagem;
+3. não iniciar T6.3, engines, UI ou T7.3 na issue seguinte.
